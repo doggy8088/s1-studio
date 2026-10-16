@@ -1,0 +1,227 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { S1RequestPayload, S1ResponsePayload } from '@/types/systemone';
+
+/**
+ * Deterministic hash helper so the built-in Sandbox Simulator produces
+ * realistic, reproducible probability distributions for any input state & question.
+ */
+function hashString(str: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash);
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const payload = (await req.json()) as S1RequestPayload;
+    const stateStr =
+      typeof payload.state === 'string'
+        ? payload.state
+        : JSON.stringify(payload.state ?? '');
+    const lowerState = stateStr.toLowerCase();
+
+    const response: S1ResponsePayload = {
+      nouls: {},
+      choices: {},
+      scores: {},
+    };
+
+    // Simulate realistic inference latency (45 ~ 135 ms)
+    await new Promise((r) => setTimeout(r, 65));
+
+    for (const [key, q] of Object.entries(payload.questions || {})) {
+      if (q.type === 'noul') {
+        let prob = 0.5;
+        const lowerKey = key.toLowerCase();
+        const lowerInst = q.instructions.toLowerCase();
+
+        if (
+          lowerKey.includes('refund') ||
+          lowerInst.includes('refund') ||
+          lowerInst.includes('reimburse')
+        ) {
+          prob =
+            lowerState.includes('refund') ||
+            lowerState.includes('charged twice') ||
+            lowerState.includes('money back')
+              ? 0.996
+              : 0.084;
+        } else if (
+          lowerKey.includes('injection') ||
+          lowerKey.includes('jailbreak') ||
+          lowerInst.includes('injection') ||
+          lowerInst.includes('override')
+        ) {
+          prob =
+            lowerState.includes('ignore previous') ||
+            lowerState.includes('system prompt') ||
+            lowerState.includes('dan ') ||
+            lowerState.includes('bypass')
+              ? 0.982
+              : 0.031;
+        } else if (lowerKey.includes('pii') || lowerInst.includes('personal')) {
+          prob =
+            lowerState.includes('@') ||
+            lowerState.includes('ssn') ||
+            lowerState.includes('card')
+              ? 0.941
+              : 0.112;
+        } else {
+          const h = hashString(`${stateStr}:${key}:${q.instructions}`);
+          prob = Number(((h % 960) / 1000 + 0.02).toFixed(3));
+        }
+
+        response.nouls![key] = { noul: prob };
+      } else if (q.type === 'choice') {
+        const optionKeys = Object.keys(q.criteria || {});
+        if (optionKeys.length === 0) continue;
+
+        // Calculate weights with keyword affinity + deterministic hash
+        const rawWeights = optionKeys.map((optKey, idx) => {
+          const desc = (q.criteria[optKey] || '').toLowerCase();
+          let score = 0.15;
+
+          if (lowerState.includes(optKey.toLowerCase())) score += 3.8;
+          if (
+            optKey === 'billing' &&
+            (lowerState.includes('charged') ||
+              lowerState.includes('invoice') ||
+              lowerState.includes('refund') ||
+              lowerState.includes('payment'))
+          ) {
+            score += 5.2;
+          }
+          if (
+            optKey === 'technical' &&
+            (lowerState.includes('bug') ||
+              lowerState.includes('crash') ||
+              lowerState.includes('error') ||
+              lowerState.includes('500'))
+          ) {
+            score += 5.0;
+          }
+          if (
+            optKey === 'security' &&
+            (lowerState.includes('ignore previous') ||
+              lowerState.includes('token') ||
+              lowerState.includes('breach'))
+          ) {
+            score += 5.5;
+          }
+
+          // Check words in description
+          const words = desc.split(/\W+/).filter((w) => w.length > 4);
+          for (const w of words) {
+            if (lowerState.includes(w)) score += 1.4;
+          }
+
+          const h = hashString(`${stateStr}:${key}:${optKey}:${idx}`);
+          score += (h % 100) / 250;
+          return score;
+        });
+
+        const total = rawWeights.reduce((acc, v) => acc + v, 0) || 1;
+        const probabilities: Record<string, number> = {};
+        let bestKey = optionKeys[0];
+        let bestProb = -1;
+
+        optionKeys.forEach((optKey, idx) => {
+          const p = Number((rawWeights[idx] / total).toFixed(4));
+          probabilities[optKey] = p;
+          // Note: strictly greater '>' preserves SystemOne tie-breaking rule (earlier option wins ties)
+          if (p > bestProb) {
+            bestProb = p;
+            bestKey = optKey;
+          }
+        });
+
+        // Confidence reflects concentration (normalized entropy / margin)
+        const sorted = [...Object.values(probabilities)].sort((a, b) => b - a);
+        const margin = sorted.length > 1 ? sorted[0] - sorted[1] : sorted[0];
+        const confidence = Number(
+          Math.min(0.995, Math.max(0.35, 0.55 + margin * 0.45)).toFixed(3)
+        );
+
+        response.choices![key] = {
+          choice: bestKey,
+          confidence,
+          probabilities,
+        };
+      } else if (q.type === 'score') {
+        const levels = q.criteria || [];
+        if (levels.length < 2) continue;
+
+        let rawProbs: number[] = [];
+
+        // Support intentional bimodal distribution trigger when state mentions "ambiguous" or "bimodal" or "conflicting"
+        if (
+          lowerState.includes('bimodal') ||
+          lowerState.includes('ambiguous') ||
+          lowerState.includes('polarized') ||
+          key.toLowerCase().includes('bimodal')
+        ) {
+          rawProbs = levels.map((_, idx) => {
+            if (idx === 0) return 0.47;
+            if (idx === levels.length - 1) return 0.48;
+            return 0.05 / Math.max(1, levels.length - 2);
+          });
+        } else if (
+          key.toLowerCase().includes('urgency') &&
+          (lowerState.includes('charged twice') ||
+            lowerState.includes('immediately') ||
+            lowerState.includes('urgent'))
+        ) {
+          if (levels.length === 3) {
+            rawProbs = [0.05, 0.49, 0.46];
+          } else {
+            rawProbs = levels.map((_, i) => (i + 1) * (i + 1));
+          }
+        } else {
+          rawProbs = levels.map((lvl, idx) => {
+            const h = hashString(`${stateStr}:${key}:${lvl}:${idx}`);
+            let w = ((h % 100) + 10) / 100;
+            if (lowerState.includes(lvl.toLowerCase())) w += 2.5;
+            return w;
+          });
+        }
+
+        const sum = rawProbs.reduce((a, b) => a + b, 0) || 1;
+        const probabilities = rawProbs.map((p) => Number((p / sum).toFixed(4)));
+
+        // Expected value normalized between 0.0 and 1.0
+        const maxIdx = levels.length - 1;
+        const expectedScore = probabilities.reduce(
+          (acc, p, idx) => acc + p * (idx / maxIdx),
+          0
+        );
+
+        // Compute variance to determine confidence (bimodal has low confidence)
+        const variance = probabilities.reduce((acc, p, idx) => {
+          const pos = idx / maxIdx;
+          return acc + p * Math.pow(pos - expectedScore, 2);
+        }, 0);
+        const confidence = Number(
+          Math.max(0.22, Math.min(0.98, 1 - variance * 2.2)).toFixed(3)
+        );
+
+        response.scores![key] = {
+          score: Number(expectedScore.toFixed(3)),
+          confidence,
+          probabilities,
+        };
+      }
+    }
+
+    if (Object.keys(response.nouls!).length === 0) delete response.nouls;
+    if (Object.keys(response.choices!).length === 0) delete response.choices;
+    if (Object.keys(response.scores!).length === 0) delete response.scores;
+
+    return NextResponse.json(response, { status: 200 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Invalid request JSON';
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
