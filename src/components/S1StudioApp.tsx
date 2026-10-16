@@ -877,6 +877,46 @@ export function S1StudioApp() {
       </main>
 
       {/* ================================================================= */}
+      {/* FOOTER: VERSION INFO & COPYRIGHT                                  */}
+      {/* ================================================================= */}
+      <footer className="mt-auto border-t border-slate-900 bg-slate-950/90 py-3.5 text-xs text-slate-400">
+        <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-3 px-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-200">S1 Studio</span>
+            <span className="rounded bg-slate-800/90 px-2 py-0.5 font-mono text-[11px] text-indigo-300 ring-1 ring-slate-700/80">
+              v{process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0'}
+              {process.env.NEXT_PUBLIC_GIT_SHA
+                ? ` (${process.env.NEXT_PUBLIC_GIT_SHA})`
+                : ''}
+            </span>
+            <span className="hidden text-slate-600 sm:inline">·</span>
+            <a
+              href="https://github.com/doggy8088/s1-studio"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden text-slate-400 underline-offset-4 hover:text-indigo-300 hover:underline sm:inline"
+            >
+              GitHub Repository
+            </a>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-slate-400">
+            <span>Copyright © 2026</span>
+            <a
+              href="https://blog.miniasp.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-slate-200 underline-offset-4 hover:text-indigo-300 hover:underline"
+            >
+              Will 保哥
+            </a>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">All rights reserved.</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* ================================================================= */}
       {/* MODALS                                                            */}
       {/* ================================================================= */}
       <ProfileManagerModal
