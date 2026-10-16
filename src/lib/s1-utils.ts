@@ -1,10 +1,13 @@
 import {
+  ChoiceResult,
   EndpointProfile,
   ExecutionRunMeta,
+  NoulResult,
   QuestionBuilderItem,
   S1Question,
   S1RequestPayload,
   S1ResponsePayload,
+  ScoreResult,
 } from '@/types/systemone';
 
 export const QUESTION_KEY_REGEX = /^[a-zA-Z0-9_.-]{1,100}$/;
@@ -13,6 +16,93 @@ export const MAX_IMAGES = 4;
 export const MAX_SINGLE_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MiB
 export const MAX_TOTAL_IMAGES_BYTES = 8 * 1024 * 1024; // 8 MiB
 export const MAX_IMAGE_MEGAPIXELS = 16_000_000; // 16 MP
+
+/**
+ * Normalize Score probabilities whether returned as a number[] array `[0.45, 0.35, 0.20]`
+ * or as an index-keyed object `{"0": 0.45, "1": 0.35, "2": 0.20}` from Ollama clef.
+ */
+export function normalizeScoreProbabilities(
+  probs: number[] | Record<string, number> | undefined,
+  levelCount: number
+): number[] {
+  if (!probs) return [];
+  if (Array.isArray(probs)) {
+    return probs.map((v) => Number(v ?? 0));
+  }
+  if (typeof probs === 'object') {
+    const arr: number[] = [];
+    const maxLen = Math.max(levelCount, Object.keys(probs).length);
+    for (let i = 0; i < maxLen; i++) {
+      arr.push(Number(probs[String(i)] ?? 0));
+    }
+    return arr;
+  }
+  return [];
+}
+
+/**
+ * Normalize raw `/v1/systemone` response payload so both:
+ * 1) Ollama `clef` / TypeSafe raw HTTP format (`{ model, answers: { key: { type, ... } }, usage }`)
+ * 2) SDK grouped format (`{ nouls: {...}, choices: {...}, scores: {...} }`)
+ * are seamlessly populated on S1ResponsePayload.
+ */
+export function normalizeS1ResponsePayload(
+  raw: Record<string, unknown>,
+  questions?: Record<string, S1Question>
+): S1ResponsePayload {
+  const normalized: S1ResponsePayload = {
+    ...(typeof raw.model === 'string' ? { model: raw.model } : {}),
+    ...(raw.usage && typeof raw.usage === 'object'
+      ? { usage: raw.usage as S1ResponsePayload['usage'] }
+      : {}),
+    nouls: { ...((raw.nouls as Record<string, NoulResult>) || {}) },
+    choices: { ...((raw.choices as Record<string, ChoiceResult>) || {}) },
+    scores: { ...((raw.scores as Record<string, ScoreResult>) || {}) },
+  };
+
+  if (raw.answers && typeof raw.answers === 'object') {
+    normalized.answers = raw.answers as S1ResponsePayload['answers'];
+    for (const [key, ansRaw] of Object.entries(
+      raw.answers as Record<string, Record<string, unknown>>
+    )) {
+      if (!ansRaw || typeof ansRaw !== 'object') continue;
+      const qType =
+        (ansRaw.type as string | undefined) || questions?.[key]?.type;
+
+      if (qType === 'noul' || typeof ansRaw.noul === 'number') {
+        normalized.nouls![key] = {
+          type: 'noul',
+          noul: Number(ansRaw.noul ?? ansRaw.probability ?? 0),
+        };
+      } else if (
+        qType === 'choice' ||
+        typeof ansRaw.choice === 'string' ||
+        typeof ansRaw.answer === 'string'
+      ) {
+        normalized.choices![key] = {
+          type: 'choice',
+          choice: String(ansRaw.choice ?? ansRaw.answer ?? ''),
+          confidence: Number(ansRaw.confidence ?? 0),
+          probabilities:
+            (ansRaw.probabilities as Record<string, number>) || undefined,
+        };
+      } else if (qType === 'score' || typeof ansRaw.score === 'number') {
+        normalized.scores![key] = {
+          type: 'score',
+          score: Number(ansRaw.score ?? 0),
+          confidence: Number(ansRaw.confidence ?? 0),
+          legend: (ansRaw.legend as Record<string, string>) || undefined,
+          probabilities: ansRaw.probabilities as
+            | number[]
+            | Record<string, number>
+            | undefined,
+        };
+      }
+    }
+  }
+
+  return normalized;
+}
 
 /**
  * Convert a Record<string, S1Question> into QuestionBuilderItem[] for GUI editing
@@ -28,7 +118,7 @@ export function questionsRecordToBuilderItems(
         ([cKey, desc], cIdx) => ({
           id: `c-${idx}-${cIdx}-${cKey}`,
           key: cKey,
-          description: String(desc ?? ''),
+          description: desc === null ? '' : String(desc ?? ''),
         })
       );
       return {
@@ -112,11 +202,11 @@ export function builderItemsToQuestionsRecord(
         instructions: item.instructions,
       };
     } else if (item.type === 'choice') {
-      const criteria: Record<string, string> = {};
+      const criteria: Record<string, string | null> = {};
       for (const c of item.choiceCriteria) {
         const ck = c.key.trim();
         if (ck) {
-          criteria[ck] = c.description;
+          criteria[ck] = c.description.trim() ? c.description : null;
         }
       }
       result[trimmedKey] = {
@@ -377,7 +467,10 @@ export async function executeSystemOneRequest(
     try {
       const parsed = JSON.parse(rawResponseText);
       if (response.ok) {
-        parsedJson = parsed as S1ResponsePayload;
+        parsedJson = normalizeS1ResponsePayload(
+          parsed as Record<string, unknown>,
+          finalPayload.questions
+        );
       } else {
         errorMsg =
           parsed?.error?.message ||

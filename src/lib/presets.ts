@@ -67,7 +67,7 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
     id: 'preset-support-triage',
     name: '客服工單分類與退款判定 (Support Ticket Triage)',
     description:
-      '同時使用 Choice 分派處理團隊、Noul 判斷是否明確要求退款、Score 評估緊急程度（對應規格書預設範例）。',
+      'Ollama Clef 官方範例：同時使用 Choice 分派處理團隊、Noul 判斷是否要求退款、Score 評估緊急程度。',
     category: 'support',
     stateMode: 'json',
     stateText: JSON.stringify(
@@ -85,22 +85,81 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
         type: 'choice',
         instructions: 'Which support team should handle this incoming ticket?',
         criteria: {
-          billing: 'Payments, invoices, duplicate charges, subscription changes, and refunds',
-          technical: 'Software bugs, API errors, crashes, and integration issues',
-          other: 'General inquiries, feature requests, or partnership questions',
+          billing:
+            'Payments, invoices, duplicate charges, subscription changes, and refunds',
+          technical:
+            'Software bugs, API errors, crashes, and integration issues',
+          other:
+            'General inquiries, feature requests, or partnership questions',
         },
       },
       refund: {
         type: 'noul',
-        instructions: 'Does the customer explicitly request a refund or money back?',
+        instructions:
+          'Does the customer explicitly request a refund or money back?',
       },
       urgency: {
         type: 'score',
-        instructions: 'How urgent is this customer request based on business impact?',
+        instructions:
+          'How urgent is this customer request based on business impact?',
         criteria: ['Routine', 'Soon', 'Urgent'],
       },
     },
     createdAt: 1729000000000,
+    isBuiltIn: true,
+  },
+  {
+    id: 'preset-agent-tool-guard',
+    name: 'AI Agent 工具呼叫安全攔截 (Tool Call Moderation)',
+    description:
+      'Ollama Clef 官方推薦場景：在 AI Agent 執行危險 Tool Call（如群發信件、刪除資料庫）前進行非自回歸毫秒級審核。',
+    category: 'agent',
+    stateMode: 'json',
+    stateText: JSON.stringify(
+      {
+        agent_id: 'customer-ops-bot',
+        proposed_tool_call: {
+          tool: 'send_email',
+          arguments: {
+            to: 'all-customers@company.com',
+            subject: 'FINAL NOTICE: Your account will be suspended today',
+            body: 'Click http://verify-account-now.example.com to keep your data.',
+          },
+        },
+      },
+      null,
+      2
+    ),
+    questions: {
+      harm: {
+        type: 'noul',
+        instructions:
+          'Could executing this tool call cause harm, mass disruption, or phishing risk?',
+      },
+      requires_human_approval: {
+        type: 'noul',
+        instructions:
+          'Does this action affect multiple users or production data such that human-in-the-loop approval is required?',
+      },
+      policy_decision: {
+        type: 'choice',
+        instructions: 'How should the agent runtime handle this tool call?',
+        criteria: {
+          deny_and_alert:
+            'Dangerous, destructive, or broadcast action that violates safety policy',
+          hold_for_approval:
+            'Sensitive action that requires a human operator to confirm',
+          allow_execution:
+            'Safe, scoped read-only or single-user routine operation',
+        },
+      },
+      blast_radius: {
+        type: 'score',
+        instructions: 'Estimate the potential blast radius if this tool call executes.',
+        criteria: ['Single User', 'Team Scoped', 'Organization Wide'],
+      },
+    },
+    createdAt: 1729000050000,
     isBuiltIn: true,
   },
   {
@@ -133,11 +192,15 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
       },
       action_policy: {
         type: 'choice',
-        instructions: 'Select the security enforcement action to take for this request.',
+        instructions:
+          'Select the security enforcement action to take for this request.',
         criteria: {
-          block_immediately: 'Clear adversarial attack, prompt injection, or unauthorized data extraction',
-          sanitize_and_warn: 'Borderline or ambiguous input that needs PII masking or policy warning',
-          allow_passthrough: 'Safe, benign user query following standard usage guidelines',
+          block_immediately:
+            'Clear adversarial attack, prompt injection, or unauthorized data extraction',
+          sanitize_and_warn:
+            'Borderline or ambiguous input that needs PII masking or policy warning',
+          allow_passthrough:
+            'Safe, benign user query following standard usage guidelines',
         },
       },
       threat_severity: {
@@ -150,6 +213,56 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
     isBuiltIn: true,
   },
   {
+    id: 'preset-invoice-audit',
+    name: '企業採購發票與報銷審核 (Invoice & Expense Audit)',
+    description:
+      'Typesafe Evals 基準測試場景：針對 JSON 格式的報銷單據進行合規檢查、費用科目分類與異常金額風險評分。',
+    category: 'support',
+    stateMode: 'json',
+    stateText: JSON.stringify(
+      {
+        invoice_number: 'INV-2026-8841',
+        employee: 'Alex Rivera (Engineering)',
+        vendor: 'CloudGPU Cluster Rentals Ltd.',
+        amount_usd: 4850.0,
+        submitted_receipt_note:
+          'Urgent H100 GPU node rental for 48-hour benchmark run. Pre-approved by VP of Engineering over Slack, but formal PO number is still pending.',
+        line_items: [
+          { item: '8x H100 80GB Instance (48h)', cost: 4600.0 },
+          { item: 'Egress Bandwidth & Snapshot Storage', cost: 250.0 },
+        ],
+      },
+      null,
+      2
+    ),
+    questions: {
+      missing_po: {
+        type: 'noul',
+        instructions:
+          'Is a formal Purchase Order (PO) number missing from this high-value invoice?',
+      },
+      expense_category: {
+        type: 'choice',
+        instructions: 'Classify this expense into the appropriate accounting ledger.',
+        criteria: {
+          cloud_infrastructure:
+            'Cloud compute, GPU instances, hosting, and storage services',
+          software_licenses: 'SaaS subscriptions and seat licenses',
+          travel_and_meals: 'Flights, hotels, client dinners, and transport',
+          office_equipment: 'Laptops, monitors, and physical hardware',
+        },
+      },
+      audit_risk: {
+        type: 'score',
+        instructions:
+          'How much financial audit attention does this reimbursement require?',
+        criteria: ['Auto-Approve', 'Manager Review', 'Finance VP Escalation'],
+      },
+    },
+    createdAt: 1729000150000,
+    isBuiltIn: true,
+  },
+  {
     id: 'preset-multimodal-bimodal',
     name: '多模態截圖診斷與兩極化分佈測試 (Multimodal & Bimodal Demo)',
     description:
@@ -158,7 +271,8 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
     stateMode: 'json',
     stateText: JSON.stringify(
       {
-        context: 'UI Screenshot inspection with bimodal / polarized reviewer signal',
+        context:
+          'UI Screenshot inspection with bimodal / polarized reviewer signal',
         viewport: '1440x900',
         note: 'The attached screenshot shows a checkout modal where the primary CTA has high contrast, but the error banner is ambiguous and polarized between completely fine vs critical layout overlap.',
       },
@@ -180,16 +294,20 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
     questions: {
       ui_defect_category: {
         type: 'choice',
-        instructions: 'Identify the primary visual status of the attached UI screenshot.',
+        instructions:
+          'Identify the primary visual status of the attached UI screenshot.',
         criteria: {
-          layout_overlap: 'Elements are overlapping, clipped, or misaligned in the viewport',
-          contrast_issue: 'Text or interactive buttons lack sufficient color contrast',
+          layout_overlap:
+            'Elements are overlapping, clipped, or misaligned in the viewport',
+          contrast_issue:
+            'Text or interactive buttons lack sufficient color contrast',
           clean_render: 'UI renders cleanly without visual defects',
         },
       },
       requires_human_review: {
         type: 'noul',
-        instructions: 'Should this screenshot be escalated to a human QA designer for manual review?',
+        instructions:
+          'Should this screenshot be escalated to a human QA designer for manual review?',
       },
       visual_severity_bimodal: {
         type: 'score',

@@ -8,7 +8,10 @@ import {
   S1Question,
   ScoreResult,
 } from '@/types/systemone';
-import { detectBimodalDistribution } from '@/lib/s1-utils';
+import {
+  detectBimodalDistribution,
+  normalizeScoreProbabilities,
+} from '@/lib/s1-utils';
 import {
   CheckCircle2,
   XCircle,
@@ -504,14 +507,24 @@ function SingleQuestionDiagnostic({
   if (!scoreRes) {
     return (
       <div className="py-2 text-xs text-slate-500">
-        回應中未包含 `scores[&quot;{qKey}&quot;]`
+        回應中未包含 `answers[&quot;{qKey}&quot;]` 或 `scores[&quot;{qKey}&quot;]`
       </div>
     );
   }
 
   const levels = question.criteria || [];
-  const probs = scoreRes.probabilities || [];
+  const probs = normalizeScoreProbabilities(
+    scoreRes.probabilities,
+    levels.length
+  );
   const bimodal = detectBimodalDistribution(probs);
+  const maxLevelIndex = Math.max(1, levels.length - 1);
+  // If score > 1 (or levels > 2), calculate normalized percentage position across levels
+  const rawScore = Number(scoreRes.score ?? 0);
+  const pointerPercent =
+    rawScore > 1
+      ? Math.min(100, Math.max(0, (rawScore / maxLevelIndex) * 100))
+      : Math.min(100, Math.max(0, rawScore * 100));
 
   return (
     <div className="space-y-3">
@@ -519,9 +532,11 @@ function SingleQuestionDiagnostic({
         <div className="flex items-baseline gap-2">
           <span className="text-xs text-slate-400">Expected Score:</span>
           <span className="font-mono text-xl font-bold text-amber-300">
-            {Number(scoreRes.score ?? 0).toFixed(3)}
+            {rawScore.toFixed(3)}
           </span>
-          <span className="text-[11px] text-slate-500">(0.000 ~ 1.000)</span>
+          <span className="text-[11px] text-slate-500">
+            (Level 0 ~ {maxLevelIndex})
+          </span>
         </div>
 
         <span className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2.5 py-1 font-mono text-xs text-slate-200">
@@ -550,9 +565,9 @@ function SingleQuestionDiagnostic({
         <div
           className="absolute -top-1 h-4 w-2 -translate-x-1/2 rounded bg-white shadow"
           style={{
-            left: `${Math.min(100, Math.max(0, Number(scoreRes.score ?? 0) * 100))}%`,
+            left: `${pointerPercent}%`,
           }}
-          title={`Expected Score: ${Number(scoreRes.score ?? 0).toFixed(3)}`}
+          title={`Expected Score: ${rawScore.toFixed(3)}`}
         />
       </div>
 

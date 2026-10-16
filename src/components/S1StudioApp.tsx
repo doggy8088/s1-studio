@@ -810,10 +810,19 @@ export function S1StudioApp() {
                   </div>
                   <JsonCodeEditor
                     value={
-                      primaryRun?.response
-                        ? JSON.stringify(primaryRun.response, null, 2)
-                        : primaryRun?.rawResponseText ||
-                          '// 尚未執行請求，點擊右上角 Run (⌘+↵) 後顯示回應內容'
+                      primaryRun?.rawResponseText
+                        ? (() => {
+                            try {
+                              return JSON.stringify(
+                                JSON.parse(primaryRun.rawResponseText),
+                                null,
+                                2
+                              );
+                            } catch {
+                              return primaryRun.rawResponseText;
+                            }
+                          })()
+                        : '// 尚未執行請求，點擊右上角 Run (⌘+↵) 後顯示回應內容'
                     }
                     readOnly
                     minHeight="180px"
@@ -833,9 +842,19 @@ export function S1StudioApp() {
                     </div>
                     <JsonCodeEditor
                       value={
-                        compareRun.response
-                          ? JSON.stringify(compareRun.response, null, 2)
-                          : compareRun.rawResponseText || '// 無回應內容'
+                        compareRun.rawResponseText
+                          ? (() => {
+                              try {
+                                return JSON.stringify(
+                                  JSON.parse(compareRun.rawResponseText),
+                                  null,
+                                  2
+                                );
+                              } catch {
+                                return compareRun.rawResponseText;
+                              }
+                            })()
+                          : '// 無回應內容'
                       }
                       readOnly
                       minHeight="160px"

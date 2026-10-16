@@ -11,7 +11,7 @@ interface NoulQuestion {
 interface ChoiceQuestion {
   type: 'choice';
   instructions: string;
-  criteria: Record<string, string>;
+  criteria: Record<string, string | null>;
 }
 
 interface ScoreQuestion {
@@ -47,23 +47,10 @@ export const onRequestPost = async (context: { request: Request }) => {
         : JSON.stringify(payload.state ?? '');
     const lowerState = stateStr.toLowerCase();
 
-    const nouls: Record<string, { noul: number }> = {};
-    const choices: Record<
-      string,
-      {
-        choice: string;
-        confidence: number;
-        probabilities: Record<string, number>;
-      }
-    > = {};
-    const scores: Record<
-      string,
-      {
-        score: number;
-        confidence: number;
-        probabilities: number[];
-      }
-    > = {};
+    const answers: Record<string, unknown> = {};
+    const nouls: Record<string, unknown> = {};
+    const choices: Record<string, unknown> = {};
+    const scores: Record<string, unknown> = {};
 
     for (const [key, q] of Object.entries(payload.questions || {})) {
       if (q.type === 'noul') {
@@ -85,22 +72,29 @@ export const onRequestPost = async (context: { request: Request }) => {
         } else if (
           lowerKey.includes('injection') ||
           lowerKey.includes('jailbreak') ||
+          lowerKey.includes('harm') ||
           lowerInst.includes('injection') ||
-          lowerInst.includes('override')
+          lowerInst.includes('override') ||
+          lowerInst.includes('harm')
         ) {
           prob =
             lowerState.includes('ignore previous') ||
             lowerState.includes('system prompt') ||
             lowerState.includes('dan ') ||
-            lowerState.includes('bypass')
-              ? 0.982
+            lowerState.includes('bypass') ||
+            lowerState.includes('all-customers') ||
+            lowerState.includes('drop table') ||
+            lowerState.includes('rm -rf')
+              ? 0.988
               : 0.031;
         } else {
           const h = hashString(`${stateStr}:${key}:${q.instructions}`);
           prob = Number(((h % 960) / 1000 + 0.02).toFixed(3));
         }
 
-        nouls[key] = { noul: prob };
+        const item = { type: 'noul', noul: prob };
+        answers[key] = item;
+        nouls[key] = item;
       } else if (q.type === 'choice') {
         const optionKeys = Object.keys(q.criteria || {});
         if (optionKeys.length === 0) continue;
@@ -157,11 +151,14 @@ export const onRequestPost = async (context: { request: Request }) => {
           Math.min(0.995, Math.max(0.35, 0.55 + margin * 0.45)).toFixed(3)
         );
 
-        choices[key] = {
+        const item = {
+          type: 'choice',
           choice: bestKey,
           confidence,
           probabilities,
         };
+        answers[key] = item;
+        choices[key] = item;
       } else if (q.type === 'score') {
         const levels = q.criteria || [];
         if (levels.length < 2) continue;
@@ -200,13 +197,21 @@ export const onRequestPost = async (context: { request: Request }) => {
         }
 
         const sum = rawProbs.reduce((a, b) => a + b, 0) || 1;
-        const probabilities = rawProbs.map((p) => Number((p / sum).toFixed(4)));
+        const probArray = rawProbs.map((p) => Number((p / sum).toFixed(4)));
+
+        const legend: Record<string, string> = {};
+        const probMap: Record<string, number> = {};
+        levels.forEach((lbl, idx) => {
+          legend[String(idx)] = lbl;
+          probMap[String(idx)] = probArray[idx];
+        });
+
         const maxIdx = levels.length - 1;
-        const expectedScore = probabilities.reduce(
+        const expectedScore = probArray.reduce(
           (acc, p, idx) => acc + p * (idx / maxIdx),
           0
         );
-        const variance = probabilities.reduce((acc, p, idx) => {
+        const variance = probArray.reduce((acc, p, idx) => {
           const pos = idx / maxIdx;
           return acc + p * Math.pow(pos - expectedScore, 2);
         }, 0);
@@ -214,20 +219,32 @@ export const onRequestPost = async (context: { request: Request }) => {
           Math.max(0.22, Math.min(0.98, 1 - variance * 2.2)).toFixed(3)
         );
 
-        scores[key] = {
+        const item = {
+          type: 'score',
           score: Number(expectedScore.toFixed(3)),
+          legend,
+          probabilities: probMap,
           confidence,
-          probabilities,
         };
+        answers[key] = item;
+        scores[key] = item;
       }
     }
 
-    const result: Record<string, unknown> = {};
-    if (Object.keys(nouls).length > 0) result.nouls = nouls;
-    if (Object.keys(choices).length > 0) result.choices = choices;
-    if (Object.keys(scores).length > 0) result.scores = scores;
-
-    return Response.json(result, { status: 200 });
+    return Response.json(
+      {
+        model: payload.model || 'clef',
+        answers,
+        nouls,
+        choices,
+        scores,
+        usage: {
+          input_tokens: Math.max(32, Math.round(stateStr.length / 3.5) + 48),
+          output_tokens: Object.keys(payload.questions || {}).length,
+        },
+      },
+      { status: 200 }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Invalid request JSON';
     return Response.json({ error: message }, { status: 400 });

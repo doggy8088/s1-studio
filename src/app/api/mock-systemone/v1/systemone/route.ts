@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S1RequestPayload, S1ResponsePayload } from '@/types/systemone';
+import {
+  S1AnswerItem,
+  S1RequestPayload,
+  S1ResponsePayload,
+} from '@/types/systemone';
 
-/**
- * Deterministic hash helper so the built-in Sandbox Simulator produces
- * realistic, reproducible probability distributions for any input state & question.
- */
 function hashString(str: string): number {
   let hash = 2166136261;
   for (let i = 0; i < str.length; i++) {
@@ -23,10 +23,17 @@ export async function POST(req: NextRequest) {
         : JSON.stringify(payload.state ?? '');
     const lowerState = stateStr.toLowerCase();
 
+    const answers: Record<string, S1AnswerItem> = {};
     const response: S1ResponsePayload = {
+      model: payload.model || 'clef',
+      answers,
       nouls: {},
       choices: {},
       scores: {},
+      usage: {
+        input_tokens: Math.max(32, Math.round(stateStr.length / 3.5) + 48),
+        output_tokens: Object.keys(payload.questions || {}).length,
+      },
     };
 
     // Simulate realistic inference latency (45 ~ 135 ms)
@@ -52,15 +59,20 @@ export async function POST(req: NextRequest) {
         } else if (
           lowerKey.includes('injection') ||
           lowerKey.includes('jailbreak') ||
+          lowerKey.includes('harm') ||
           lowerInst.includes('injection') ||
-          lowerInst.includes('override')
+          lowerInst.includes('override') ||
+          lowerInst.includes('harm')
         ) {
           prob =
             lowerState.includes('ignore previous') ||
             lowerState.includes('system prompt') ||
             lowerState.includes('dan ') ||
-            lowerState.includes('bypass')
-              ? 0.982
+            lowerState.includes('bypass') ||
+            lowerState.includes('all-customers') ||
+            lowerState.includes('drop table') ||
+            lowerState.includes('rm -rf')
+              ? 0.988
               : 0.031;
         } else if (lowerKey.includes('pii') || lowerInst.includes('personal')) {
           prob =
@@ -74,12 +86,13 @@ export async function POST(req: NextRequest) {
           prob = Number(((h % 960) / 1000 + 0.02).toFixed(3));
         }
 
-        response.nouls![key] = { noul: prob };
+        const item = { type: 'noul' as const, noul: prob };
+        answers[key] = item;
+        response.nouls![key] = item;
       } else if (q.type === 'choice') {
         const optionKeys = Object.keys(q.criteria || {});
         if (optionKeys.length === 0) continue;
 
-        // Calculate weights with keyword affinity + deterministic hash
         const rawWeights = optionKeys.map((optKey, idx) => {
           const desc = (q.criteria[optKey] || '').toLowerCase();
           let score = 0.15;
@@ -112,7 +125,6 @@ export async function POST(req: NextRequest) {
             score += 5.5;
           }
 
-          // Check words in description
           const words = desc.split(/\W+/).filter((w) => w.length > 4);
           for (const w of words) {
             if (lowerState.includes(w)) score += 1.4;
@@ -131,32 +143,32 @@ export async function POST(req: NextRequest) {
         optionKeys.forEach((optKey, idx) => {
           const p = Number((rawWeights[idx] / total).toFixed(4));
           probabilities[optKey] = p;
-          // Note: strictly greater '>' preserves SystemOne tie-breaking rule (earlier option wins ties)
           if (p > bestProb) {
             bestProb = p;
             bestKey = optKey;
           }
         });
 
-        // Confidence reflects concentration (normalized entropy / margin)
         const sorted = [...Object.values(probabilities)].sort((a, b) => b - a);
         const margin = sorted.length > 1 ? sorted[0] - sorted[1] : sorted[0];
         const confidence = Number(
           Math.min(0.995, Math.max(0.35, 0.55 + margin * 0.45)).toFixed(3)
         );
 
-        response.choices![key] = {
+        const item = {
+          type: 'choice' as const,
           choice: bestKey,
           confidence,
           probabilities,
         };
+        answers[key] = item;
+        response.choices![key] = item;
       } else if (q.type === 'score') {
         const levels = q.criteria || [];
         if (levels.length < 2) continue;
 
         let rawProbs: number[] = [];
 
-        // Support intentional bimodal distribution trigger when state mentions "ambiguous" or "bimodal" or "conflicting"
         if (
           lowerState.includes('bimodal') ||
           lowerState.includes('ambiguous') ||
@@ -189,17 +201,22 @@ export async function POST(req: NextRequest) {
         }
 
         const sum = rawProbs.reduce((a, b) => a + b, 0) || 1;
-        const probabilities = rawProbs.map((p) => Number((p / sum).toFixed(4)));
+        const probArray = rawProbs.map((p) => Number((p / sum).toFixed(4)));
 
-        // Expected value normalized between 0.0 and 1.0
+        const legend: Record<string, string> = {};
+        const probMap: Record<string, number> = {};
+        levels.forEach((lbl, idx) => {
+          legend[String(idx)] = lbl;
+          probMap[String(idx)] = probArray[idx];
+        });
+
         const maxIdx = levels.length - 1;
-        const expectedScore = probabilities.reduce(
+        const expectedScore = probArray.reduce(
           (acc, p, idx) => acc + p * (idx / maxIdx),
           0
         );
 
-        // Compute variance to determine confidence (bimodal has low confidence)
-        const variance = probabilities.reduce((acc, p, idx) => {
+        const variance = probArray.reduce((acc, p, idx) => {
           const pos = idx / maxIdx;
           return acc + p * Math.pow(pos - expectedScore, 2);
         }, 0);
@@ -207,17 +224,17 @@ export async function POST(req: NextRequest) {
           Math.max(0.22, Math.min(0.98, 1 - variance * 2.2)).toFixed(3)
         );
 
-        response.scores![key] = {
+        const item = {
+          type: 'score' as const,
           score: Number(expectedScore.toFixed(3)),
+          legend,
+          probabilities: probMap,
           confidence,
-          probabilities,
         };
+        answers[key] = item;
+        response.scores![key] = item;
       }
     }
-
-    if (Object.keys(response.nouls!).length === 0) delete response.nouls;
-    if (Object.keys(response.choices!).length === 0) delete response.choices;
-    if (Object.keys(response.scores!).length === 0) delete response.scores;
 
     return NextResponse.json(response, { status: 200 });
   } catch (err: unknown) {
