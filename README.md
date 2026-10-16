@@ -7,14 +7,14 @@
 ## ✨ 核心功能亮點
 
 ### 1. 端點與連線設定檔管理 (Endpoint Profiles & CORS Proxy)
-- 內建三組標準端點範本与一組本機沙盒模擬器：
+- 內建三組標準端點範本與一組本機沙盒模擬器：
   - **Local Ollama**：`http://localhost:11434` (`clef` / `clef-flash`)
   - **Ollama Cloud**：`https://ollama.com` (`clef:cloud`)
   - **TypeSafe AI**：`https://api.typesafe.ai` (`jev-1.13.0`)
   - **Built-in Sandbox Simulator**：`/api/mock-systemone`（免外部連線即可完整體驗機率分佈與兩極化警示）
 - **雙發送模式（Direct / Proxy Mode）**：
-  - **Direct Mode**：由瀏覽器直接發送 `fetch` 請求。
-  - **Proxy Mode**：透過內建無狀態 `/api/proxy` 轉發請求，解決雲端或本機未設定 `OLLAMA_ORIGINS` 時的 CORS 阻擋問題，且不留存任何 Payload 與金鑰。
+  - **Direct Mode**：由瀏覽器直接發送 `fetch` 請求（適合測試本機已設定 `OLLAMA_ORIGINS="*"` 的 Ollama）。
+  - **Proxy Mode**：透過內建無狀態 `/api/proxy`（本機為 Next.js API Route，部署至 Cloudflare Pages 時自動轉換為 Cloudflare Edge Worker `functions/api/proxy.ts`）轉發請求，解決雲端 CORS 阻擋問題，且不留存任何 Payload 與金鑰。
 
 ### 2. 狀態與多模態視覺輸入 (State & Multimodal Input)
 - **State 雙模式**：支援 `Text Mode` 純文字與 `JSON Mode`（CodeMirror 6 語法高亮與即時格式檢查，送出時自動以 JSON Object/Array 封裝而非轉義字串）。
@@ -47,12 +47,33 @@
 
 ```bash
 # 安裝依賴
-bun install
+make install
 
 # 啟動開發伺服器 (http://localhost:3000)
-bun run dev
+make dev
 
-# 建置正式環境版本
-bun run build
-bun run start
+# 執行完整檢查 (TypeScript + ESLint + Build)
+make check
+```
+
+---
+
+## ☁️ 部署至 Cloudflare Pages（含 Edge Proxy API）
+
+本專案已完整配置 **Cloudflare Pages 靜態匯出 (`out/`) + Cloudflare Pages Functions (`functions/api/*`)**：
+- `functions/api/proxy.ts` 會自動部署為 Cloudflare Edge Worker `/api/proxy`，負責無狀態代理轉發雲端 `/v1/systemone` 請求。
+- `functions/api/mock-systemone/v1/systemone.ts` 會自動部署為 `/api/mock-systemone/v1/systemone` 內建沙盒模擬端點。
+
+### 方式 A：透過 GitHub Actions CI 自動部署（已內建 `.github/workflows/deploy-cloudflare-pages.yml`）
+只需在 GitHub Repository 的 **Settings → Secrets and variables → Actions** 新增以下兩個 Secrets，每次推送至 `main` 分支即會自動建置並部署至 Cloudflare Pages：
+1. `CLOUDFLARE_API_TOKEN`：具備 **Cloudflare Pages: Edit** 權限的 API Token。
+2. `CLOUDFLARE_ACCOUNT_ID`：您的 Cloudflare Account ID。
+
+### 方式 B：在 Cloudflare Pages 後台直接綁定 GitHub 儲存庫
+- **Build command**：`bun run build:cf`
+- **Build output directory**：`out`
+
+### 方式 C：本機透過 Wrangler CLI 一鍵部署
+```bash
+make cf-deploy
 ```

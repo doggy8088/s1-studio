@@ -1,6 +1,7 @@
-.PHONY: help install dev build start lint typecheck check clean
+.PHONY: help install dev build cf-build cf-deploy start lint typecheck check clean
 
 PORT ?= 3000
+CF_PROJECT ?= s1-studio
 
 help: ## Show available make targets
 	@echo "S1 Studio (s1-studio) — Common Tasks"
@@ -13,8 +14,14 @@ install: ## Install dependencies with bun
 dev: ## Start Next.js development server (default PORT=3000)
 	bun run dev -- --port $(PORT)
 
-build: ## Create optimized production build
+build: ## Create standard Next.js production build
 	bun run build
+
+cf-build: ## Build static export (out/) + Cloudflare Pages Functions (functions/)
+	bun run build:cf
+
+cf-deploy: cf-build ## Deploy out/ and functions/ to Cloudflare Pages via Wrangler
+	npx wrangler pages deploy out --project-name=$(CF_PROJECT)
 
 start: ## Start Next.js production server (default PORT=3000)
 	bun run start -- --port $(PORT)
@@ -28,4 +35,4 @@ typecheck: ## Run TypeScript compiler type check (noEmit)
 check: typecheck lint build ## Run full verification pipeline (typecheck + lint + build)
 
 clean: ## Remove Next.js build artifacts and caches
-	rm -rf .next out tsconfig.tsbuildinfo
+	rm -rf .next out tsconfig.tsbuildinfo .cf-api-backup

@@ -289,7 +289,7 @@ export function detectBimodalDistribution(
 
   // Case 2: Any number of levels where two non-adjacent peaks exist with a valley between them
   if (n >= 4) {
-    let peaks: number[] = [];
+    const peaks: number[] = [];
     for (let i = 0; i < n; i++) {
       const left = i > 0 ? probabilities[i - 1] : -1;
       const right = i < n - 1 ? probabilities[i + 1] : -1;

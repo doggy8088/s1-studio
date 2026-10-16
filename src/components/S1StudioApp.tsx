@@ -57,10 +57,14 @@ export function S1StudioApp() {
   // -------------------------------------------------------------------------
   // 1. Endpoint Profiles & Compare Mode State
   // -------------------------------------------------------------------------
-  const [profiles, setProfiles] = useState<EndpointProfile[]>(DEFAULT_PROFILES);
-  const [activeProfileId, setActiveProfileId] = useState<string>(
-    DEFAULT_PROFILES[0].id
+  const [profiles, setProfiles] = useState<EndpointProfile[]>(() =>
+    loadProfilesFromLocalStorage()
   );
+  const [activeProfileId, setActiveProfileId] = useState<string>(() => {
+    const loaded = loadProfilesFromLocalStorage();
+    const saved = loadActiveProfileId();
+    return loaded.some((p) => p.id === saved) ? saved : loaded[0].id;
+  });
   const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
   const [compareProfileId, setCompareProfileId] = useState<string>(
     DEFAULT_PROFILES[3]?.id || DEFAULT_PROFILES[1].id
@@ -101,18 +105,6 @@ export function S1StudioApp() {
     prompt_injection: 0.5,
   });
   const [copiedCurlQuick, setCopiedCurlQuick] = useState(false);
-
-  // Load saved profiles on mount
-  useEffect(() => {
-    const loadedProfiles = loadProfilesFromLocalStorage();
-    const savedActive = loadActiveProfileId();
-    setProfiles(loadedProfiles);
-    if (loadedProfiles.some((p) => p.id === savedActive)) {
-      setActiveProfileId(savedActive);
-    } else {
-      setActiveProfileId(loadedProfiles[0].id);
-    }
-  }, []);
 
   const activeProfile = useMemo(
     () => profiles.find((p) => p.id === activeProfileId) || profiles[0],
