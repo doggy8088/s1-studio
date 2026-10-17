@@ -36,7 +36,16 @@ export function ProfileManagerModal({
   onSaveProfiles,
 }: ProfileManagerModalProps) {
   const [selectedId, setSelectedId] = useState<string>(activeProfileId);
+  const [prevSyncKey, setPrevSyncKey] = useState(
+    `${isOpen}:${activeProfileId}`
+  );
   const [showKey, setShowKey] = useState(false);
+
+  const currentSyncKey = `${isOpen}:${activeProfileId}`;
+  if (currentSyncKey !== prevSyncKey) {
+    setPrevSyncKey(currentSyncKey);
+    setSelectedId(activeProfileId);
+  }
 
   useEffect(() => {
     if (!isOpen) return;

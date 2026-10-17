@@ -619,12 +619,23 @@ export function S1StudioApp() {
                 })}
               </div>
 
-              <code className="hidden rounded border border-[#222632] bg-[#0b0c0e] px-2 py-0.5 font-mono text-xs text-zinc-400 md:inline xl:hidden">
-                {formatEndpointPreviewUrl(
+              <button
+                type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                title={formatEndpointPreviewUrl(
                   activeProfile.baseUrl,
                   activeProfile.defaultModel
                 )}
-              </code>
+                className="hidden items-center gap-1.5 rounded border border-[#222632] bg-[#0b0c0e] px-2.5 py-0.5 font-mono text-xs text-zinc-300 transition hover:border-[#383f52] hover:text-zinc-100 md:inline-flex xl:hidden"
+              >
+                <span className="font-sans text-zinc-500">POST</span>
+                <span className="max-w-[260px] truncate">
+                  {formatEndpointPreviewUrl(
+                    activeProfile.baseUrl,
+                    activeProfile.defaultModel
+                  )}
+                </span>
+              </button>
             </div>
           </div>
         </div>
