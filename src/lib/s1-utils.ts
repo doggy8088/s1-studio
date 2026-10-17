@@ -41,15 +41,49 @@ export function normalizeScoreProbabilities(
 }
 
 /**
- * Normalize raw `/v1/systemone` response payload so both:
+ * Format or resolve the target endpoint URL for a given baseUrl and model:
+ * - Cloudflare Workers AI URLs containing `/ai/run/` are kept as-is (or switched to `@cf/cloudflare/clef-flash` when model is `clef-flash`).
+ * - Standard SystemOne endpoints have `/v1/systemone` appended if not already present.
+ */
+export function formatEndpointPreviewUrl(
+  baseUrl: string,
+  model?: string
+): string {
+  const clean = baseUrl.trim().replace(/\/+$/, '');
+  if (clean.includes('/ai/run/')) {
+    if (
+      model?.trim() === 'clef-flash' &&
+      clean.endsWith('/@cf/cloudflare/clef')
+    ) {
+      return clean.replace(
+        /\/@cf\/cloudflare\/clef$/,
+        '/@cf/cloudflare/clef-flash'
+      );
+    }
+    return clean;
+  }
+  return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
+}
+
+/**
+ * Normalize raw `/v1/systemone` response payload so:
  * 1) Ollama `clef` / TypeSafe raw HTTP format (`{ model, answers: { key: { type, ... } }, usage }`)
- * 2) SDK grouped format (`{ nouls: {...}, choices: {...}, scores: {...} }`)
+ * 2) Cloudflare Workers AI v4 REST format (`{ result: { model, answers, usage }, success: true }`)
+ * 3) SDK grouped format (`{ nouls: {...}, choices: {...}, scores: {...} }`)
  * are seamlessly populated on S1ResponsePayload.
  */
 export function normalizeS1ResponsePayload(
-  raw: Record<string, unknown>,
+  rawInput: Record<string, unknown>,
   questions?: Record<string, S1Question>
 ): S1ResponsePayload {
+  const raw =
+    rawInput.result &&
+    typeof rawInput.result === 'object' &&
+    !rawInput.answers &&
+    !rawInput.nouls
+      ? (rawInput.result as Record<string, unknown>)
+      : rawInput;
+
   const normalized: S1ResponsePayload = {
     ...(typeof raw.model === 'string' ? { model: raw.model } : {}),
     ...(raw.usage && typeof raw.usage === 'object'
@@ -423,9 +457,21 @@ export async function executeSystemOneRequest(
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const isInternalMock = baseUrlClean.startsWith('/api/');
 
-  const targetEndpoint = baseUrlClean.endsWith('/v1/systemone')
-    ? baseUrlClean
-    : `${baseUrlClean}/v1/systemone`;
+  const targetEndpoint = formatEndpointPreviewUrl(baseUrlClean, modelToUse);
+
+  if (targetEndpoint.includes('$CLOUDFLARE_ACCOUNT_ID')) {
+    return {
+      profileId: profile.id,
+      profileName: profile.name,
+      model: modelToUse || '(default)',
+      status: 400,
+      statusText: 'Missing Account ID',
+      latencyMs: 0,
+      error:
+        '若要在瀏覽器直接呼叫 Cloudflare Workers AI，請點選上方「端點與金鑰設定」，將 Base URL 中的 $CLOUDFLARE_ACCOUNT_ID 替換為您的 Cloudflare Account ID 並填入 API Key；或直接點擊右上角「cURL | jq」複製指令至終端機執行。',
+      timestamp: Date.now(),
+    };
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -442,7 +488,7 @@ export async function executeSystemOneRequest(
     let response: Response;
 
     if (profile.useProxy && !isInternalMock) {
-      headers['x-s1-target-url'] = baseUrlClean;
+      headers['x-s1-target-url'] = targetEndpoint;
       response = await fetch('/api/proxy', {
         method: 'POST',
         headers,
@@ -472,7 +518,12 @@ export async function executeSystemOneRequest(
           finalPayload.questions
         );
       } else {
+        const cfError =
+          Array.isArray(parsed?.errors) && parsed.errors[0]?.message
+            ? parsed.errors[0].message
+            : undefined;
         errorMsg =
+          cfError ||
           parsed?.error?.message ||
           parsed?.error ||
           parsed?.message ||

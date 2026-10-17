@@ -41,6 +41,24 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
     if (!Array.isArray(parsed) || parsed.length === 0) {
       return DEFAULT_PROFILES;
     }
+
+    // Merge any newly added built-in DEFAULT_PROFILES (e.g. cloudflare-workers-ai-clef)
+    const existingIds = new Set(parsed.map((p) => p.id));
+    const missingDefaults = DEFAULT_PROFILES.filter(
+      (dp) => !existingIds.has(dp.id)
+    );
+    if (missingDefaults.length > 0) {
+      const simIdx = parsed.findIndex((p) => p.id === 's1-builtin-simulator');
+      const merged = [...parsed];
+      if (simIdx >= 0) {
+        merged.splice(simIdx, 0, ...missingDefaults);
+      } else {
+        merged.push(...missingDefaults);
+      }
+      window.localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
+      return merged;
+    }
+
     return parsed;
   } catch {
     return DEFAULT_PROFILES;

@@ -30,9 +30,10 @@ export const onRequestPost = async (context: { request: Request }) => {
     }
 
     const cleanedBase = targetBaseUrl.trim().replace(/\/+$/, '');
-    const targetEndpoint = cleanedBase.endsWith('/v1/systemone')
-      ? cleanedBase
-      : `${cleanedBase}/v1/systemone`;
+    const targetEndpoint =
+      cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
+        ? cleanedBase
+        : `${cleanedBase}/v1/systemone`;
 
     let parsedUrl: URL;
     try {

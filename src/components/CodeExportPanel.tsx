@@ -6,6 +6,7 @@ import {
   generateCurlSnippet,
   generatePythonSnippet,
   generateTypeScriptSnippet,
+  getProfileApiKeyEnvVar,
 } from '@/lib/code-exporter';
 import { Check, Copy, Terminal, Code, KeyRound } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export function CodeExportPanel({
   );
   const [includeRawKey, setIncludeRawKey] = useState(false);
   const [copied, setCopied] = useState(false);
+  const envVarName = getProfileApiKeyEnvVar(profile);
 
   const snippet = (() => {
     const opts = {
@@ -108,7 +110,7 @@ export function CodeExportPanel({
                 className="accent-amber-500"
               />
               <KeyRound className="h-3.5 w-3.5 text-amber-400" />
-              帶入實際 API Key (預設使用 $API_KEY)
+              帶入實際 API Key (預設使用 ${envVarName})
             </label>
           )}
 

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { EndpointProfile } from '@/types/systemone';
 import { BASE_URL_TEMPLATES, DEFAULT_PROFILES } from '@/lib/presets';
+import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
   Plus,
   Trash2,
@@ -199,16 +200,21 @@ export function ProfileManagerModal({
           {/* Right editor */}
           <div className="space-y-5 p-6 md:col-span-7">
             <div>
-              <label className="block text-sm font-semibold text-zinc-200">
-                Profile Name 設定檔名稱
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-zinc-200">
+                  Profile Name 設定檔名稱
+                </label>
+                <span className="font-mono text-xs text-amber-300/90">
+                  cURL 變數：${getProfileApiKeyEnvVar(currentProfile)}
+                </span>
+              </div>
               <input
                 type="text"
                 value={currentProfile.name}
                 onChange={(e) =>
                   handleUpdateCurrent({ name: e.target.value })
                 }
-                placeholder="例：Ollama Cloud、Local Clef、TypeSafe Jev"
+                placeholder="例：LLMShare、Ollama Cloud、Cloudflare Workers AI、TypeSafe AI"
                 className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
               />
             </div>
@@ -219,7 +225,9 @@ export function ProfileManagerModal({
                   Base URL 端點根網址
                 </label>
                 <span className="font-mono text-xs text-zinc-400">
-                  自動附加 /v1/systemone
+                  {currentProfile.baseUrl.includes('/ai/run/')
+                    ? 'Cloudflare Workers AI 端點'
+                    : '自動附加 /v1/systemone'}
                 </span>
               </div>
               <input
@@ -296,7 +304,7 @@ export function ProfileManagerModal({
                   onChange={(e) =>
                     handleUpdateCurrent({ apiKey: e.target.value })
                   }
-                  placeholder="sk-... 或留空（本機 Ollama 免填）"
+                  placeholder={`sk-... 或留空（複製 cURL 時預設使用 $${getProfileApiKeyEnvVar(currentProfile)}）`}
                   className="w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] py-2.5 pr-10 pl-3.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
                 <button

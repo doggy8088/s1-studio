@@ -26,6 +26,15 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     useProxy: true,
   },
   {
+    id: 'cloudflare-workers-ai-clef',
+    name: 'Cloudflare Workers AI (clef)',
+    baseUrl:
+      'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
+    apiKey: '',
+    defaultModel: 'clef',
+    useProxy: true,
+  },
+  {
     id: 's1-builtin-simulator',
     name: 'Built-in Sandbox Simulator (Demo)',
     baseUrl: '/api/mock-systemone',
@@ -50,6 +59,11 @@ export const BASE_URL_TEMPLATES = [
     label: 'TypeSafe AI',
     url: 'https://api.typesafe.ai',
     defaultModel: 'jev-1.13.0',
+  },
+  {
+    label: 'Cloudflare Workers AI',
+    url: 'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
+    defaultModel: 'clef',
   },
   {
     label: '內建模擬器 (Demo)',

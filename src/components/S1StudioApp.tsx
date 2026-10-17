@@ -20,10 +20,14 @@ import {
 import {
   builderItemsToQuestionsRecord,
   executeSystemOneRequest,
+  formatEndpointPreviewUrl,
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
-import { generateCurlSnippet } from '@/lib/code-exporter';
+import {
+  generateCurlSnippet,
+  getProfileApiKeyEnvVar,
+} from '@/lib/code-exporter';
 import { JsonCodeEditor } from './JsonCodeEditor';
 import { ImageDropzone } from './ImageDropzone';
 import { QuestionsBuilder } from './QuestionsBuilder';
@@ -394,7 +398,7 @@ export function S1StudioApp() {
               type="button"
               onClick={handleQuickCopyCurl}
               className="flex items-center gap-2 rounded-xl border border-[#282d3a] bg-[#14171f] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:border-[#383f52] hover:bg-[#1b1f2a]"
-              title="一鍵複製 curl -s ... | jq 指令"
+              title={`一鍵複製 curl -s ... | jq 指令 (使用 $${getProfileApiKeyEnvVar(activeProfile)})`}
             >
               {copiedCurlQuick ? (
                 <>
@@ -565,12 +569,18 @@ export function S1StudioApp() {
           <button
             type="button"
             onClick={() => setIsProfileModalOpen(true)}
-            title="點擊設定端點網址 (Endpoint Base URL)"
+            title={formatEndpointPreviewUrl(
+              activeProfile.baseUrl,
+              activeProfile.defaultModel
+            )}
             className="hidden items-center gap-1.5 rounded-lg border border-[#252934] bg-[#0b0c0e] px-2.5 py-1.5 font-mono text-xs text-zinc-300 transition hover:border-[#383f52] hover:text-zinc-100 xl:flex"
           >
             <span className="font-sans text-zinc-500">POST</span>
             <span className="max-w-[260px] truncate">
-              {activeProfile.baseUrl.replace(/\/+$/, '')}/v1/systemone
+              {formatEndpointPreviewUrl(
+                activeProfile.baseUrl,
+                activeProfile.defaultModel
+              )}
             </span>
           </button>
         </div>
@@ -610,7 +620,10 @@ export function S1StudioApp() {
               </div>
 
               <code className="hidden rounded border border-[#222632] bg-[#0b0c0e] px-2 py-0.5 font-mono text-xs text-zinc-400 md:inline xl:hidden">
-                {activeProfile.baseUrl.replace(/\/+$/, '')}/v1/systemone
+                {formatEndpointPreviewUrl(
+                  activeProfile.baseUrl,
+                  activeProfile.defaultModel
+                )}
               </code>
             </div>
           </div>

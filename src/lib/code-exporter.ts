@@ -5,10 +5,76 @@ export interface CodeGenOptions {
   noulThresholds?: Record<string, number>;
 }
 
-function getEndpointUrl(baseUrl: string): string {
+/**
+ * Resolve the shell / environment variable name for a given EndpointProfile:
+ * - Custom Profile named `LLMShare` -> `LLMSHARE_API_KEY`
+ * - Cloudflare Workers AI -> `CLOUDFLARE_API_KEY`
+ * - Ollama Cloud -> `OLLAMA_API_KEY`
+ * - TypeSafe AI -> `TYPESAFE_API_KEY`
+ * - Fallback -> `API_KEY`
+ */
+export function getProfileApiKeyEnvVar(profile: EndpointProfile): string {
+  const id = (profile.id || '').toLowerCase();
+  const name = (profile.name || '').toLowerCase();
+  const url = (profile.baseUrl || '').toLowerCase();
+
+  if (name.includes('llmshare') || url.includes('llmshare')) {
+    return 'LLMSHARE_API_KEY';
+  }
+  if (
+    id.includes('cloudflare') ||
+    name.includes('cloudflare') ||
+    url.includes('cloudflare.com')
+  ) {
+    return 'CLOUDFLARE_API_KEY';
+  }
+  if (
+    id === 'ollama-cloud-clef' ||
+    name.includes('ollama cloud') ||
+    url.includes('ollama.com')
+  ) {
+    return 'OLLAMA_API_KEY';
+  }
+  if (
+    id === 'typesafe-ai-jev' ||
+    name.includes('typesafe') ||
+    url.includes('typesafe.ai')
+  ) {
+    return 'TYPESAFE_API_KEY';
+  }
+  return 'API_KEY';
+}
+
+export function shouldIncludeAuthInSnippet(profile: EndpointProfile): boolean {
+  if (profile.apiKey && profile.apiKey.trim().length > 0) return true;
+  if (getProfileApiKeyEnvVar(profile) !== 'API_KEY') return true;
+  const url = (profile.baseUrl || '').trim().toLowerCase();
+  if (
+    url.startsWith('/') ||
+    url.includes('localhost') ||
+    url.includes('127.0.0.1')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function getEndpointUrl(baseUrl: string, model?: string): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
   if (clean.startsWith('/')) {
     return `http://localhost:3000${clean}/v1/systemone`;
+  }
+  if (clean.includes('/ai/run/')) {
+    if (
+      model?.trim() === 'clef-flash' &&
+      clean.endsWith('/@cf/cloudflare/clef')
+    ) {
+      return clean.replace(
+        /\/@cf\/cloudflare\/clef$/,
+        '/@cf/cloudflare/clef-flash'
+      );
+    }
+    return clean;
   }
   return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
 }
@@ -21,15 +87,18 @@ export function generateCurlSnippet(
   payload: S1RequestPayload,
   options: CodeGenOptions
 ): string {
-  const endpoint = getEndpointUrl(profile.baseUrl);
+  const endpoint = getEndpointUrl(profile.baseUrl, payload.model || profile.defaultModel);
   const jsonPayload = JSON.stringify(payload, null, 2);
   const escapedBody = jsonPayload.replace(/'/g, `'\\''`);
 
-  const hasAuth = Boolean(profile.apiKey && profile.apiKey.trim());
-  const authHeaderLine = hasAuth
-    ? options.includeRawApiKey
+  const envVarName = getProfileApiKeyEnvVar(profile);
+  const hasRawKey = Boolean(profile.apiKey && profile.apiKey.trim());
+  const includeAuth = shouldIncludeAuthInSnippet(profile);
+
+  const authHeaderLine = includeAuth
+    ? options.includeRawApiKey && hasRawKey
       ? `  -H "Authorization: Bearer ${profile.apiKey.trim()}" \\\n`
-      : `  -H "Authorization: Bearer $API_KEY" \\\n`
+      : `  -H "Authorization: Bearer $${envVarName}" \\\n`
     : '';
 
   return `curl -s -X POST "${endpoint}" \\
@@ -50,12 +119,11 @@ export function generatePythonSnippet(
     ? `http://localhost:3000${baseUrlClean}`
     : baseUrlClean;
 
+  const envVarName = getProfileApiKeyEnvVar(profile);
   const apiKeyExpr =
-    profile.apiKey && profile.apiKey.trim()
-      ? options.includeRawApiKey
-        ? `"${profile.apiKey.trim()}"`
-        : `os.environ.get("TYPESAFE_API_KEY", "")`
-      : `os.environ.get("TYPESAFE_API_KEY", "")`;
+    profile.apiKey && profile.apiKey.trim() && options.includeRawApiKey
+      ? `"${profile.apiKey.trim()}"`
+      : `os.environ.get("${envVarName}", "")`;
 
   const payloadJson = JSON.stringify(payload, null, 4)
     .replace(/\btrue\b/g, 'True')
@@ -115,12 +183,11 @@ export function generateTypeScriptSnippet(
     ? `http://localhost:3000${baseUrlClean}`
     : baseUrlClean;
 
+  const envVarName = getProfileApiKeyEnvVar(profile);
   const apiKeyExpr =
-    profile.apiKey && profile.apiKey.trim()
-      ? options.includeRawApiKey
-        ? `"${profile.apiKey.trim()}"`
-        : `process.env.TYPESAFE_API_KEY ?? ""`
-      : `process.env.TYPESAFE_API_KEY ?? ""`;
+    profile.apiKey && profile.apiKey.trim() && options.includeRawApiKey
+      ? `"${profile.apiKey.trim()}"`
+      : `process.env.${envVarName} ?? ""`;
 
   const payloadStr = JSON.stringify(payload, null, 2);
 
@@ -143,7 +210,7 @@ runDecision().catch(console.error);
 `;
   }
 
-  const endpoint = getEndpointUrl(profile.baseUrl);
+  const endpoint = getEndpointUrl(profile.baseUrl, payload.model || profile.defaultModel);
   return `const ENDPOINT = "${endpoint}";
 const API_KEY = ${apiKeyExpr};
 

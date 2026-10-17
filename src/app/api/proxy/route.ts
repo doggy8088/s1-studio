@@ -12,11 +12,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Normalize URL and ensure /v1/systemone path
+    // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ endpoint)
     const cleanedBase = targetBaseUrl.trim().replace(/\/+$/, '');
-    const targetEndpoint = cleanedBase.endsWith('/v1/systemone')
-      ? cleanedBase
-      : `${cleanedBase}/v1/systemone`;
+    const targetEndpoint =
+      cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
+        ? cleanedBase
+        : `${cleanedBase}/v1/systemone`;
 
     // Validate URL protocol
     let parsedUrl: URL;
