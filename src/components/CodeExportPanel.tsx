@@ -45,69 +45,69 @@ export function CodeExportPanel({
   };
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex flex-wrap gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
+    <div className="space-y-4 rounded-xl border border-[#252934] bg-[#14171f] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#282c37] bg-[#0d0e12] p-1">
           <button
             type="button"
             onClick={() => setLang('curl')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition ${
               lang === 'curl'
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Terminal className="h-3.5 w-3.5" />
+            <Terminal className="h-4 w-4 text-amber-400" />
             cURL + jq
           </button>
           <button
             type="button"
             onClick={() => setLang('python')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition ${
               lang === 'python'
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Code className="h-3.5 w-3.5" />
-            Python (typesafe-sdk)
+            <Code className="h-4 w-4 text-sky-400" />
+            Python SDK
           </button>
           <button
             type="button"
             onClick={() => setLang('ts-sdk')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition ${
               lang === 'ts-sdk'
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Code className="h-3.5 w-3.5" />
-            TypeScript (@typesafe/sdk)
+            <Code className="h-4 w-4 text-emerald-400" />
+            TypeScript SDK
           </button>
           <button
             type="button"
             onClick={() => setLang('ts-fetch')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition ${
               lang === 'ts-fetch'
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Code className="h-3.5 w-3.5" />
-            TypeScript (Native fetch)
+            <Code className="h-4 w-4 text-amber-400" />
+            Native fetch
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
           {profile.apiKey && (
-            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-[11px] text-slate-300">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#2b303d] bg-[#0d0e12] px-3 py-2 text-xs font-medium text-zinc-300">
               <input
                 type="checkbox"
                 checked={includeRawKey}
                 onChange={(e) => setIncludeRawKey(e.target.checked)}
-                className="accent-indigo-500"
+                className="accent-amber-500"
               />
-              <KeyRound className="h-3 w-3 text-amber-400" />
+              <KeyRound className="h-3.5 w-3.5 text-amber-400" />
               帶入實際 API Key (預設使用 $API_KEY)
             </label>
           )}
@@ -115,16 +115,16 @@ export function CodeExportPanel({
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-zinc-950 transition hover:bg-amber-400"
           >
             {copied ? (
               <>
-                <Check className="h-3.5 w-3.5 text-emerald-300" />
-                已複製!
+                <Check className="h-4 w-4" />
+                已複製程式碼
               </>
             ) : (
               <>
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-4 w-4" />
                 複製程式碼
               </>
             )}
@@ -132,7 +132,7 @@ export function CodeExportPanel({
         </div>
       </div>
 
-      <pre className="max-h-[500px] overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-200">
+      <pre className="max-h-[560px] overflow-auto rounded-xl border border-[#242834] bg-[#0b0c0f] p-4 font-mono text-sm leading-relaxed text-zinc-200">
         <code>{snippet}</code>
       </pre>
     </div>

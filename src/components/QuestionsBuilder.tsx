@@ -25,13 +25,47 @@ import {
   Code2,
   LayoutList,
   CheckCircle2,
-  HelpCircle,
+  CopyPlus,
 } from 'lucide-react';
 
 interface QuestionsBuilderProps {
   items: QuestionBuilderItem[];
   onChange: (items: QuestionBuilderItem[]) => void;
 }
+
+const PRIMITIVE_META: Record<
+  QuestionType,
+  {
+    label: string;
+    shortDesc: string;
+    borderAccent: string;
+    activePill: string;
+    dotColor: string;
+  }
+> = {
+  noul: {
+    label: 'NOUL',
+    shortDesc: 'Boolean Gate',
+    borderAccent: 'border-l-emerald-500',
+    activePill:
+      'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40',
+    dotColor: 'bg-emerald-400',
+  },
+  choice: {
+    label: 'CHOICE',
+    shortDesc: 'Discrete Route',
+    borderAccent: 'border-l-sky-500',
+    activePill: 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/40',
+    dotColor: 'bg-sky-400',
+  },
+  score: {
+    label: 'SCORE',
+    shortDesc: 'Graded Spectrum',
+    borderAccent: 'border-l-amber-500',
+    activePill: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40',
+    dotColor: 'bg-amber-400',
+  },
+};
 
 export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
   const [mode, setMode] = useState<'ui' | 'json'>('ui');
@@ -52,7 +86,6 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
       setRawJsonError(null);
       setMode('json');
     } else {
-      // Validate raw JSON before switching back to UI if possible, or keep synchronized
       try {
         const parsed = JSON.parse(rawJsonText);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -80,7 +113,6 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
     try {
       const parsed = JSON.parse(val);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        // Validate each entry lightly
         for (const [k, q] of Object.entries(parsed)) {
           const qObj = q as Record<string, unknown>;
           if (
@@ -114,32 +146,72 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
     onChange(items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   };
 
-  const handleAddQuestion = () => {
+  const handleAddQuestion = (defaultType: QuestionType = 'noul') => {
     if (items.length >= MAX_QUESTIONS) return;
     const nextIdx = items.length + 1;
+    const uid =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID().slice(0, 8)
+        : String(nextIdx);
     const newItem: QuestionBuilderItem = {
-      id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `q-${uid}`,
       key: `question_${nextIdx}`,
-      type: 'noul',
-      instructions: 'Evaluate whether this condition holds true.',
+      type: defaultType,
+      instructions:
+        defaultType === 'noul'
+          ? 'Evaluate whether this condition holds true.'
+          : defaultType === 'choice'
+            ? 'Select the single most appropriate route for this input.'
+            : 'Rate the severity or priority level on the ordered scale.',
       choiceCriteria: [
-        { id: `c-${Date.now()}-1`, key: 'option_a', description: 'First choice criterion' },
-        { id: `c-${Date.now()}-2`, key: 'option_b', description: 'Second choice criterion' },
+        {
+          id: `c-${uid}-1`,
+          key: 'option_a',
+          description: 'First choice criterion',
+        },
+        {
+          id: `c-${uid}-2`,
+          key: 'option_b',
+          description: 'Second choice criterion',
+        },
       ],
       scoreCriteria: [
-        { id: `s-${Date.now()}-1`, label: 'Routine' },
-        { id: `s-${Date.now()}-2`, label: 'Soon' },
-        { id: `s-${Date.now()}-3`, label: 'Urgent' },
+        { id: `s-${uid}-1`, label: 'Routine' },
+        { id: `s-${uid}-2`, label: 'Soon' },
+        { id: `s-${uid}-3`, label: 'Urgent' },
       ],
     };
     onChange([...items, newItem]);
+  };
+
+  const handleDuplicateQuestion = (item: QuestionBuilderItem, index: number) => {
+    if (items.length >= MAX_QUESTIONS) return;
+    const uid =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID().slice(0, 8)
+        : `${index + 1}-copy`;
+    const cloned: QuestionBuilderItem = {
+      ...item,
+      id: `q-${uid}`,
+      key: `${item.key}_copy`,
+      choiceCriteria: item.choiceCriteria.map((c, idx) => ({
+        ...c,
+        id: `c-${uid}-${idx}`,
+      })),
+      scoreCriteria: item.scoreCriteria.map((s, idx) => ({
+        ...s,
+        id: `s-${uid}-${idx}`,
+      })),
+    };
+    const next = [...items];
+    next.splice(index + 1, 0, cloned);
+    onChange(next);
   };
 
   const handleRemoveQuestion = (id: string) => {
     onChange(items.filter((item) => item.id !== id));
   };
 
-  // Reorder helper for Choice or Score criteria
   const reorderArray = <T,>(arr: T[], fromIdx: number, toIdx: number): T[] => {
     if (toIdx < 0 || toIdx >= arr.length || fromIdx === toIdx) return arr;
     const copy = [...arr];
@@ -148,7 +220,6 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
     return copy;
   };
 
-  // Count duplicate keys for immediate visual feedback
   const keyCounts: Record<string, number> = {};
   for (const item of items) {
     const k = item.key.trim();
@@ -156,65 +227,71 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Section Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-xs font-semibold tracking-wide text-slate-200 uppercase">
-            Questions 決策問題建構器
-          </h2>
-          <span
-            className={`rounded-full px-2 py-0.5 font-mono text-[11px] font-medium ${
-              items.length >= MAX_QUESTIONS
-                ? 'bg-rose-500/20 text-rose-300'
-                : 'bg-slate-800 text-slate-300'
-            }`}
-          >
-            {items.length}/{MAX_QUESTIONS}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[#2c313d] bg-[#171a21] font-mono text-xs font-bold text-amber-400">
+            03
           </span>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-base font-semibold tracking-tight text-zinc-100">
+              Decision Questions 決策問題定義
+            </h2>
+            <span
+              className={`telemetry-num rounded-md px-2 py-0.5 font-mono text-xs font-semibold ${
+                items.length >= MAX_QUESTIONS
+                  ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40'
+                  : 'bg-[#1a1d26] text-zinc-300 ring-1 ring-[#2b303c]'
+              }`}
+              title={`單次請求可平行評估最多 ${MAX_QUESTIONS} 道結構化決策原語（Noul · Choice · Score）`}
+            >
+              {items.length} / {MAX_QUESTIONS}
+            </span>
+          </div>
         </div>
 
         {/* UI | Raw JSON Toggle */}
-        <div className="inline-flex rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+        <div className="inline-flex rounded-lg border border-[#282c37] bg-[#0d0e12] p-1">
           <button
             type="button"
             onClick={() => handleSwitchMode('ui')}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
               mode === 'ui'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <LayoutList className="h-3.5 w-3.5" />
-            UI 表單
+            <LayoutList className="h-4 w-4 text-amber-400" />
+            視覺表單
           </button>
           <button
             type="button"
             onClick={() => handleSwitchMode('json')}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
               mode === 'json'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Code2 className="h-3.5 w-3.5" />
+            <Code2 className="h-4 w-4 text-sky-400" />
             Raw JSON
           </button>
         </div>
       </div>
 
       {mode === 'json' ? (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>直接編輯 questions 物件（即時雙向同步至 GUI 表單）</span>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-zinc-400">
+            <span>直接編輯 questions 物件（即時雙向同步至視覺表單）</span>
             {rawJsonError ? (
-              <span className="flex items-center gap-1 text-rose-400">
-                <AlertCircle className="h-3.5 w-3.5" />
+              <span className="flex items-center gap-1.5 font-medium text-rose-400">
+                <AlertCircle className="h-4 w-4" />
                 語法或結構待修正
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-emerald-400">
-                <CheckCircle2 className="h-3.5 w-3.5" />
+              <span className="flex items-center gap-1.5 font-medium text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
                 JSON 已同步 ({items.length} 題)
               </span>
             )}
@@ -222,110 +299,147 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
           <JsonCodeEditor
             value={rawJsonText}
             onChange={handleRawJsonChange}
-            minHeight="280px"
-            maxHeight="520px"
+            minHeight="320px"
+            maxHeight="580px"
           />
           {rawJsonError && (
-            <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {rawJsonError}
             </div>
           )}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {items.map((item, qIdx) => {
             const trimmedKey = item.key.trim();
             const isRegexInvalid =
               trimmedKey.length === 0 || !QUESTION_KEY_REGEX.test(trimmedKey);
-            const isDuplicate = trimmedKey.length > 0 && keyCounts[trimmedKey] > 1;
+            const isDuplicate =
+              trimmedKey.length > 0 && keyCounts[trimmedKey] > 1;
             const hasKeyError = isRegexInvalid || isDuplicate;
+            const meta = PRIMITIVE_META[item.type];
 
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-slate-800/90 bg-slate-900/60 p-3.5 shadow-sm transition hover:border-slate-700/90"
+                className={`rounded-xl border border-[#252934] border-l-4 ${meta.borderAccent} bg-[#14171f] p-4 shadow-sm transition hover:border-[#323746]`}
               >
-                {/* Top row: Index + Key + Type Selector + Delete */}
-                <div className="flex flex-wrap items-start gap-2.5">
-                  <span className="mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-800 font-mono text-[11px] font-semibold text-slate-300">
-                    {qIdx + 1}
-                  </span>
+                {/* Header bar of Question Card: Number + Key Input + Segmented Primitive Switcher + Actions */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  {/* Left: Question Index + Key Input */}
+                  <div className="flex flex-1 items-start gap-3">
+                    <span className="telemetry-num mt-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#2b303d] bg-[#0d0e12] font-mono text-xs font-bold text-zinc-300">
+                      #{qIdx + 1}
+                    </span>
 
-                  {/* Question Key input with pattern & validation */}
-                  <div className="min-w-[180px] flex-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-medium text-slate-400">
-                        Question Key
-                      </label>
-                      <span className="font-mono text-[10px] text-slate-500">
-                        ^[a-zA-Z0-9_.-]&#123;1,100&#125;$
-                      </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <label className="text-xs font-semibold text-zinc-300">
+                          Question Key 識別鍵名
+                        </label>
+                        <span className="font-mono text-xs text-zinc-500">
+                          a-z, 0-9, _, ., -
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        pattern="^[a-zA-Z0-9_.-]{1,100}$"
+                        value={item.key}
+                        onChange={(e) =>
+                          handleUpdateQuestion(item.id, { key: e.target.value })
+                        }
+                        placeholder="e.g. team, refund, urgency"
+                        className={`mt-1.5 w-full rounded-lg border px-3.5 py-2 font-mono text-sm font-medium transition focus:outline-none ${
+                          hasKeyError
+                            ? 'border-rose-500 bg-rose-950/30 text-rose-200'
+                            : 'border-[#2a2f3d] bg-[#0d0e12] text-zinc-100 focus:border-amber-500/70'
+                        }`}
+                      />
+                      {isRegexInvalid && (
+                        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                          僅限英數、底線 `_`、點 `.`、連字號 `-` (1~100 字元)
+                        </p>
+                      )}
+                      {isDuplicate && (
+                        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                          Question Key &ldquo;{trimmedKey}&rdquo; 重複，請使用唯一鍵名
+                        </p>
+                      )}
                     </div>
-                    <input
-                      type="text"
-                      required
-                      pattern="^[a-zA-Z0-9_.-]{1,100}$"
-                      value={item.key}
-                      onChange={(e) =>
-                        handleUpdateQuestion(item.id, { key: e.target.value })
-                      }
-                      placeholder="e.g. team, refund, urgency"
-                      className={`mt-1 w-full rounded-lg border px-2.5 py-1.5 font-mono text-xs transition focus:outline-none ${
-                        hasKeyError
-                          ? 'border-rose-500 bg-rose-950/30 text-rose-200'
-                          : 'border-slate-700/90 bg-slate-950 text-slate-100 focus:border-indigo-500'
-                      }`}
-                    />
-                    {isRegexInvalid && (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-rose-400">
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        僅限英數、底線 `_`、點 `.`、連字號 `-` (1~100 字元)
-                      </p>
-                    )}
-                    {isDuplicate && (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-rose-400">
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        Question Key &ldquo;{trimmedKey}&rdquo; 重複，請使用唯一名稱
-                      </p>
-                    )}
                   </div>
 
-                  {/* Question Type Selector */}
-                  <div className="w-36 shrink-0">
-                    <label className="text-[11px] font-medium text-slate-400">
-                      Primitive Type
-                    </label>
-                    <select
-                      value={item.type}
-                      onChange={(e) =>
-                        handleUpdateQuestion(item.id, {
-                          type: e.target.value as QuestionType,
-                        })
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-700/90 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-100 focus:border-indigo-500 focus:outline-none"
-                    >
-                      <option value="noul">noul (Boolean %)</option>
-                      <option value="choice">choice (Selection)</option>
-                      <option value="score">score (Ordered Levels)</option>
-                    </select>
-                  </div>
+                  {/* Right: 1-Click Segmented Primitive Type Selector + Duplicate/Delete */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold text-zinc-400">
+                        Primitive 決策型別
+                      </span>
+                      <div
+                        className="mt-1.5 inline-flex rounded-lg border border-[#292e3b] bg-[#0d0e12] p-1"
+                        role="group"
+                        aria-label="Select question primitive type"
+                      >
+                        {(['noul', 'choice', 'score'] as QuestionType[]).map(
+                          (t) => {
+                            const active = item.type === t;
+                            const m = PRIMITIVE_META[t];
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateQuestion(item.id, { type: t })
+                                }
+                                title={`${m.label} — ${m.shortDesc}`}
+                                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-mono text-xs font-bold transition ${
+                                  active
+                                    ? m.activePill
+                                    : 'text-zinc-400 hover:bg-[#181b22] hover:text-zinc-200'
+                                }`}
+                              >
+                                <span
+                                  className={`h-2 w-2 rounded-full ${
+                                    active ? m.dotColor : 'bg-zinc-600'
+                                  }`}
+                                />
+                                {m.label}
+                              </button>
+                            );
+                          }
+                        )}
+                      </div>
+                    </div>
 
-                  {/* Delete button */}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveQuestion(item.id)}
-                    disabled={items.length <= 1}
-                    className="mt-6 rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-30"
-                    title="刪除此問題"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                    <div className="mt-5 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicateQuestion(item, qIdx)}
+                        disabled={items.length >= MAX_QUESTIONS}
+                        className="rounded-lg border border-transparent p-2 text-zinc-400 transition hover:border-[#2e3340] hover:bg-[#1c2029] hover:text-zinc-100 disabled:opacity-30"
+                        title="複製此問題 (Duplicate Question)"
+                      >
+                        <CopyPlus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveQuestion(item.id)}
+                        disabled={items.length <= 1}
+                        className="rounded-lg border border-transparent p-2 text-zinc-400 transition hover:border-rose-500/30 hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-30"
+                        title="刪除此問題"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Instructions field */}
-                <div className="mt-3">
-                  <label className="block text-[11px] font-medium text-slate-400">
-                    Instructions (評估指示)
+                <div className="mt-3.5">
+                  <label className="block text-xs font-semibold text-zinc-300">
+                    Instructions 評估指示
                   </label>
                   <input
                     type="text"
@@ -337,24 +451,26 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                       })
                     }
                     placeholder="輸入針對該問題的明確評估指示..."
-                    className="mt-1 w-full rounded-lg border border-slate-700/90 bg-slate-950 px-3 py-1.5 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 w-full rounded-lg border border-[#2a2f3d] bg-[#0d0e12] px-3.5 py-2.5 text-sm text-zinc-100 transition focus:border-amber-500/70 focus:outline-none"
                   />
                 </div>
 
                 {/* Type-specific Criteria Builder */}
                 {item.type === 'choice' && (
-                  <div className="mt-3 space-y-2 rounded-lg border border-slate-800/80 bg-slate-950/60 p-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <span className="text-[11px] font-semibold text-indigo-300">
-                        Choice Criteria (Key-Value 清單 · 支援拖曳排序)
-                      </span>
-                      <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                        <HelpCircle className="h-3 w-3 text-indigo-400" />
-                        SystemOne 規範：同分 (Tie-breaking) 時優先選擇排在前面的選項
+                  <div className="mt-4 space-y-3 rounded-xl border border-[#242936] bg-[#0d0e12]/90 p-3.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-sky-400" />
+                        <span className="text-xs font-semibold text-sky-300">
+                          Choice Criteria 候選路由清單（支援拖曳或上下排序）
+                        </span>
+                      </div>
+                      <span className="text-xs text-zinc-400">
+                        同分 (Tie-breaking) 時優先選擇排在前面的選項
                       </span>
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {item.choiceCriteria.map((crit, cIdx) => (
                         <div
                           key={crit.id}
@@ -382,15 +498,15 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                             }
                             setDragState(null);
                           }}
-                          className="flex items-center gap-1.5 rounded-md border border-slate-800/90 bg-slate-900/90 p-1.5"
+                          className="flex flex-wrap items-center gap-2 rounded-lg border border-[#222632] bg-[#14171f] p-2 sm:flex-nowrap"
                         >
                           <span
-                            className="cursor-grab px-1 text-slate-500 hover:text-slate-300"
+                            className="cursor-grab px-1 text-zinc-500 hover:text-zinc-300"
                             title="拖曳調整優先順序"
                           >
-                            <GripVertical className="h-3.5 w-3.5" />
+                            <GripVertical className="h-4 w-4" />
                           </span>
-                          <span className="w-4 text-center font-mono text-[10px] text-slate-500">
+                          <span className="telemetry-num w-5 text-center font-mono text-xs font-semibold text-zinc-400">
                             #{cIdx + 1}
                           </span>
                           <input
@@ -408,7 +524,7 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                               });
                             }}
                             placeholder="Option key"
-                            className="w-28 shrink-0 rounded border border-slate-700/80 bg-slate-950 px-2 py-1 font-mono text-xs text-indigo-200 focus:border-indigo-500 focus:outline-none sm:w-36"
+                            className="w-28 shrink-0 rounded-md border border-[#2b303d] bg-[#0d0e12] px-2.5 py-1.5 font-mono text-sm font-medium text-sky-200 focus:border-sky-500 focus:outline-none"
                           />
                           <input
                             type="text"
@@ -425,9 +541,9 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                               });
                             }}
                             placeholder="Criterion description..."
-                            className="min-w-0 flex-1 rounded border border-slate-700/80 bg-slate-950 px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                            className="min-w-[160px] flex-1 rounded-md border border-[#2b303d] bg-[#0d0e12] px-3 py-1.5 text-sm text-zinc-100 focus:border-sky-500 focus:outline-none"
                           />
-                          <div className="flex items-center">
+                          <div className="flex items-center gap-0.5">
                             <button
                               type="button"
                               onClick={() =>
@@ -440,10 +556,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                 })
                               }
                               disabled={cIdx === 0}
-                              className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-25"
+                              className="rounded p-1.5 text-zinc-400 hover:bg-[#222632] hover:text-zinc-100 disabled:opacity-25"
                               title="上移"
                             >
-                              <ArrowUp className="h-3 w-3" />
+                              <ArrowUp className="h-3.5 w-3.5" />
                             </button>
                             <button
                               type="button"
@@ -457,10 +573,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                 })
                               }
                               disabled={cIdx === item.choiceCriteria.length - 1}
-                              className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-25"
+                              className="rounded p-1.5 text-zinc-400 hover:bg-[#222632] hover:text-zinc-100 disabled:opacity-25"
                               title="下移"
                             >
-                              <ArrowDown className="h-3 w-3" />
+                              <ArrowDown className="h-3.5 w-3.5" />
                             </button>
                             <button
                               type="button"
@@ -472,10 +588,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                   ),
                                 })
                               }
-                              className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-25"
+                              className="rounded p-1.5 text-zinc-400 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-25"
                               title="刪除選項 (最少保留 2 個)"
                             >
-                              <Trash2 className="h-3 w-3" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -497,26 +613,29 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                           ],
                         });
                       }}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-700/80 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-indigo-300 hover:border-indigo-500/50 hover:bg-indigo-500/10"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
                     >
-                      <Plus className="h-3 w-3" />
-                      Add Criterion
+                      <Plus className="h-3.5 w-3.5" />
+                      新增選項 (Add Choice Option)
                     </button>
                   </div>
                 )}
 
                 {item.type === 'score' && (
-                  <div className="mt-3 space-y-2 rounded-lg border border-slate-800/80 bg-slate-950/60 p-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <span className="text-[11px] font-semibold text-amber-300">
-                        Score Criteria (有序等級陣列 · 由低到高排列 · 最少 2 個等級)
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        計算期望值時自動將索引對應至 0.000 ~ 1.000
+                  <div className="mt-4 space-y-3 rounded-xl border border-[#242936] bg-[#0d0e12]/90 p-3.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-amber-400" />
+                        <span className="text-xs font-semibold text-amber-300">
+                          Score Criteria 有序等級定義（由低至高 · 最少 2 級）
+                        </span>
+                      </div>
+                      <span className="text-xs text-zinc-400">
+                        計算期望值時自動對應索引權重 0.000 ~ 1.000
                       </span>
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {item.scoreCriteria.map((sc, sIdx) => {
                         const weightPct =
                           item.scoreCriteria.length > 1
@@ -552,15 +671,15 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                               }
                               setDragState(null);
                             }}
-                            className="flex items-center gap-1.5 rounded-md border border-slate-800/90 bg-slate-900/90 p-1.5"
+                            className="flex items-center gap-2 rounded-lg border border-[#222632] bg-[#14171f] p-2"
                           >
                             <span
-                              className="cursor-grab px-1 text-slate-500 hover:text-slate-300"
+                              className="cursor-grab px-1 text-zinc-500 hover:text-zinc-300"
                               title="拖曳調整等級順序"
                             >
-                              <GripVertical className="h-3.5 w-3.5" />
+                              <GripVertical className="h-4 w-4" />
                             </span>
-                            <span className="w-16 shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-center font-mono text-[10px] text-amber-300">
+                            <span className="telemetry-num w-20 shrink-0 rounded-md bg-amber-500/15 px-2 py-1 text-center font-mono text-xs font-semibold text-amber-300 ring-1 ring-amber-500/30">
                               Lv.{sIdx} ({weightPct}%)
                             </span>
                             <input
@@ -578,9 +697,9 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                 });
                               }}
                               placeholder="Level label (e.g. Routine, Soon, Urgent)"
-                              className="min-w-0 flex-1 rounded border border-slate-700/80 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              className="min-w-0 flex-1 rounded-md border border-[#2b303d] bg-[#0d0e12] px-3 py-1.5 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                             />
-                            <div className="flex items-center">
+                            <div className="flex items-center gap-0.5">
                               <button
                                 type="button"
                                 onClick={() =>
@@ -593,10 +712,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                   })
                                 }
                                 disabled={sIdx === 0}
-                                className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-25"
+                                className="rounded p-1.5 text-zinc-400 hover:bg-[#222632] hover:text-zinc-100 disabled:opacity-25"
                                 title="上移"
                               >
-                                <ArrowUp className="h-3 w-3" />
+                                <ArrowUp className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 type="button"
@@ -610,10 +729,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                   })
                                 }
                                 disabled={sIdx === item.scoreCriteria.length - 1}
-                                className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-25"
+                                className="rounded p-1.5 text-zinc-400 hover:bg-[#222632] hover:text-zinc-100 disabled:opacity-25"
                                 title="下移"
                               >
-                                <ArrowDown className="h-3 w-3" />
+                                <ArrowDown className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 type="button"
@@ -625,10 +744,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                                     ),
                                   })
                                 }
-                                className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-25"
+                                className="rounded p-1.5 text-zinc-400 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-25"
                                 title="刪除等級 (最少保留 2 個等級)"
                               >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </div>
@@ -650,10 +769,10 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
                           ],
                         });
                       }}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-700/80 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-amber-300 hover:border-amber-500/50 hover:bg-amber-500/10"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20"
                     >
-                      <Plus className="h-3 w-3" />
-                      Add Score Level
+                      <Plus className="h-3.5 w-3.5" />
+                      新增評分等級 (Add Score Level)
                     </button>
                   </div>
                 )}
@@ -661,15 +780,36 @@ export function QuestionsBuilder({ items, onChange }: QuestionsBuilderProps) {
             );
           })}
 
-          <button
-            type="button"
-            onClick={handleAddQuestion}
-            disabled={items.length >= MAX_QUESTIONS}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 py-2.5 text-xs font-semibold text-indigo-300 transition hover:border-indigo-500/60 hover:bg-indigo-500/10 disabled:opacity-40"
-          >
-            <Plus className="h-4 w-4" />
-            Add Question ({items.length}/{MAX_QUESTIONS})
-          </button>
+          {/* Quick-Add Bar for the 3 Primitives */}
+          <div className="grid grid-cols-1 gap-2.5 pt-1 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => handleAddQuestion('noul')}
+              disabled={items.length >= MAX_QUESTIONS}
+              className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-500/35 bg-emerald-500/5 py-3 text-sm font-semibold text-emerald-300 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />
+              <span>新增 NOUL 是非題</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAddQuestion('choice')}
+              disabled={items.length >= MAX_QUESTIONS}
+              className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-sky-500/35 bg-sky-500/5 py-3 text-sm font-semibold text-sky-300 transition hover:border-sky-500/60 hover:bg-sky-500/10 disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />
+              <span>新增 CHOICE 選擇題</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAddQuestion('score')}
+              disabled={items.length >= MAX_QUESTIONS}
+              className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-amber-500/35 bg-amber-500/5 py-3 text-sm font-semibold text-amber-300 transition hover:border-amber-500/60 hover:bg-amber-500/10 disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />
+              <span>新增 SCORE 評分題</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

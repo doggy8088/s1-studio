@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   db,
@@ -28,9 +28,9 @@ import {
   Plus,
   X,
   Clock,
-  Sparkles,
   FileJson,
   Split,
+  Layers,
 } from 'lucide-react';
 
 interface PresetsAndHistoryModalProps {
@@ -43,6 +43,7 @@ interface PresetsAndHistoryModalProps {
   currentQuestions: Record<string, S1Question>;
   currentPayload: S1RequestPayload;
   onApplyPresetOrHistory: (data: {
+    presetId?: string;
     stateMode: 'text' | 'json';
     stateText: string;
     images?: UploadedImageItem[];
@@ -62,10 +63,26 @@ export function PresetsAndHistoryModal({
   onApplyPresetOrHistory,
 }: PresetsAndHistoryModalProps) {
   const [tab, setTab] = useState<'presets' | 'history'>(initialTab);
+  const [prevSyncKey, setPrevSyncKey] = useState(`${isOpen}:${initialTab}`);
   const [newPresetName, setNewPresetName] = useState('');
   const [newPresetDesc, setNewPresetDesc] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const currentSyncKey = `${isOpen}:${initialTab}`;
+  if (currentSyncKey !== prevSyncKey) {
+    setPrevSyncKey(currentSyncKey);
+    setTab(initialTab);
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
 
   const historyList = useLiveQuery(
     () => db.history.orderBy('timestamp').reverse().limit(50).toArray(),
@@ -130,7 +147,6 @@ export function PresetsAndHistoryModal({
       const text = await file.text();
       const parsed = JSON.parse(text);
 
-      // Support both S1ExportFileFormat (.s1.json) and raw S1RequestPayload
       if (parsed && parsed.payload && parsed.payload.questions) {
         const exp = parsed as S1ExportFileFormat;
         const importedImages: UploadedImageItem[] = (
@@ -217,41 +233,45 @@ export function PresetsAndHistoryModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
+      onClick={onClose}
     >
-      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900 text-slate-100 shadow-2xl">
+      <div
+        className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#2a2f3d] bg-[#12141a] text-zinc-100 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Top Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-5 py-3.5">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232732] px-6 py-4">
+          <div className="inline-flex rounded-xl border border-[#282d3a] bg-[#0d0e12] p-1">
             <button
               type="button"
               onClick={() => setTab('presets')}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
                 tab === 'presets'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-500 text-zinc-950 font-bold'
+                  : 'text-zinc-300 hover:text-zinc-100'
               }`}
             >
-              <Bookmark className="h-3.5 w-3.5" />
-              測試範本 (Presets)
+              <Bookmark className="h-4 w-4" />
+              測試場景範本 (Presets)
             </button>
             <button
               type="button"
               onClick={() => setTab('history')}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
                 tab === 'history'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-500 text-zinc-950 font-bold'
+                  : 'text-zinc-300 hover:text-zinc-100'
               }`}
             >
-              <History className="h-3.5 w-3.5" />
-              歷史紀錄 ({historyList?.length ?? 0}/50)
+              <History className="h-4 w-4" />
+              執行歷史紀錄 ({historyList?.length ?? 0}/50)
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <input
               ref={fileInputRef}
               type="file"
@@ -268,67 +288,67 @@ export function PresetsAndHistoryModal({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              className="flex items-center gap-2 rounded-xl border border-[#2c313f] bg-[#171a22] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:bg-[#202430]"
             >
-              <Upload className="h-3.5 w-3.5 text-indigo-400" />
+              <Upload className="h-4 w-4 text-sky-400" />
               匯入 `.s1.json`
             </button>
             <button
               type="button"
               onClick={handleExportS1Json}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              className="flex items-center gap-2 rounded-xl border border-[#2c313f] bg-[#171a22] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:bg-[#202430]"
             >
-              <Download className="h-3.5 w-3.5 text-emerald-400" />
+              <Download className="h-4 w-4 text-emerald-400" />
               匯出 `.s1.json`
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              className="rounded-lg p-2 text-zinc-400 transition hover:bg-[#1e222d] hover:text-zinc-100"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
         {importError && (
-          <div className="border-b border-rose-500/40 bg-rose-500/10 px-5 py-2 text-xs text-rose-200">
+          <div className="border-b border-rose-500/40 bg-rose-500/10 px-6 py-3 text-sm text-rose-200">
             {importError}
           </div>
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-6">
           {tab === 'presets' ? (
             <div className="space-y-6">
               {/* Save current state as custom preset */}
               <form
                 onSubmit={handleSaveCurrentAsPreset}
-                className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"
+                className="rounded-xl border border-[#262b38] bg-[#0d0e12] p-4"
               >
-                <div className="mb-2.5 flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-300">
                   <Plus className="h-4 w-4" />
-                  將當前編輯狀態儲存為自訂範本 (儲存於 IndexedDB)
+                  將當前編輯狀態儲存為自訂範本（保存於本機 IndexedDB）
                 </div>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-12">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
                   <input
                     type="text"
                     required
                     value={newPresetName}
                     onChange={(e) => setNewPresetName(e.target.value)}
                     placeholder="範本名稱 (例：電商退貨詐欺風險評估)"
-                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 sm:col-span-4"
+                    className="rounded-xl border border-[#2b303d] bg-[#14171f] px-3.5 py-2 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none sm:col-span-4"
                   />
                   <input
                     type="text"
                     value={newPresetDesc}
                     onChange={(e) => setNewPresetDesc(e.target.value)}
                     placeholder="簡短說明 (選填)"
-                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 sm:col-span-6"
+                    className="rounded-xl border border-[#2b303d] bg-[#14171f] px-3.5 py-2 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none sm:col-span-6"
                   />
                   <button
                     type="submit"
-                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 sm:col-span-2"
+                    className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-zinc-950 transition hover:bg-amber-400 sm:col-span-2"
                   >
                     儲存範本
                   </button>
@@ -336,30 +356,30 @@ export function PresetsAndHistoryModal({
               </form>
 
               {/* Built-in Presets */}
-              <div className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-slate-400 uppercase">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                  內建經典範本 (Built-in Presets)
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-2 text-sm font-semibold tracking-wider text-zinc-300 uppercase">
+                  <Layers className="h-4 w-4 text-amber-400" />
+                  內建真實測試場景 (Built-in Scenarios)
                 </h3>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {BUILT_IN_PRESETS.map((preset) => (
                     <div
                       key={preset.id}
-                      className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-950/70 p-4 transition hover:border-indigo-500/50"
+                      className="flex flex-col justify-between rounded-xl border border-[#262b38] bg-[#0d0e12] p-5 transition hover:border-amber-500/45"
                     >
                       <div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="rounded bg-indigo-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-indigo-300 uppercase">
+                          <span className="rounded-md bg-amber-500/15 px-2.5 py-0.5 font-mono text-xs font-semibold text-amber-300 uppercase ring-1 ring-amber-500/30">
                             {preset.category}
                           </span>
-                          <span className="font-mono text-[11px] text-slate-500">
+                          <span className="telemetry-num font-mono text-xs text-zinc-400">
                             {Object.keys(preset.questions).length} Questions
                           </span>
                         </div>
-                        <h4 className="mt-2 text-xs font-bold text-slate-100">
+                        <h4 className="mt-3 text-base font-bold text-zinc-100">
                           {preset.name}
                         </h4>
-                        <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                        <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
                           {preset.description}
                         </p>
                       </div>
@@ -368,6 +388,7 @@ export function PresetsAndHistoryModal({
                         type="button"
                         onClick={() => {
                           onApplyPresetOrHistory({
+                            presetId: preset.id,
                             stateMode: preset.stateMode,
                             stateText: preset.stateText,
                             images: preset.images || [],
@@ -375,10 +396,10 @@ export function PresetsAndHistoryModal({
                           });
                           onClose();
                         }}
-                        className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-800 py-1.5 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-600 hover:text-white"
+                        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-[#2c313f] bg-[#181b22] py-2.5 text-sm font-semibold text-zinc-100 transition hover:border-amber-500 hover:bg-amber-500 hover:text-zinc-950"
                       >
-                        <FileJson className="h-3.5 w-3.5" />
-                        載入此範本
+                        <FileJson className="h-4 w-4" />
+                        載入此測試場景
                       </button>
                     </div>
                   ))}
@@ -387,21 +408,21 @@ export function PresetsAndHistoryModal({
 
               {/* Custom Presets */}
               {customPresets && customPresets.length > 0 && (
-                <div className="space-y-2.5">
-                  <h3 className="text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold tracking-wider text-zinc-300 uppercase">
                     自訂範本 ({customPresets.length})
                   </h3>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     {customPresets.map((preset) => (
                       <div
                         key={preset.id}
-                        className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/70 p-3.5"
+                        className="flex items-center justify-between rounded-xl border border-[#262b38] bg-[#0d0e12] p-4"
                       >
                         <div className="min-w-0 flex-1 pr-3">
-                          <div className="truncate text-xs font-bold text-slate-100">
+                          <div className="truncate text-sm font-bold text-zinc-100">
                             {preset.name}
                           </div>
-                          <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                          <div className="mt-1 truncate text-xs text-zinc-400">
                             {preset.description}
                           </div>
                         </div>
@@ -410,6 +431,7 @@ export function PresetsAndHistoryModal({
                             type="button"
                             onClick={() => {
                               onApplyPresetOrHistory({
+                                presetId: preset.id,
                                 stateMode: preset.stateMode,
                                 stateText: preset.stateText,
                                 images: preset.images || [],
@@ -417,14 +439,14 @@ export function PresetsAndHistoryModal({
                               });
                               onClose();
                             }}
-                            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                            className="rounded-lg bg-amber-500 px-3.5 py-2 text-xs font-bold text-zinc-950 hover:bg-amber-400"
                           >
                             套用
                           </button>
                           <button
                             type="button"
                             onClick={() => deleteCustomPreset(preset.id)}
-                            className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+                            className="rounded-lg p-2 text-zinc-400 hover:bg-rose-500/20 hover:text-rose-300"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -436,29 +458,29 @@ export function PresetsAndHistoryModal({
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-400">
+                <p className="text-sm text-zinc-400">
                   自動於本機 IndexedDB 保存最近 50 筆測試請求與回應紀錄。
                 </p>
                 {historyList && historyList.length > 0 && (
                   <button
                     type="button"
                     onClick={() => clearAllHistory()}
-                    className="flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/20"
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-4 w-4" />
                     清空全部紀錄
                   </button>
                 )}
               </div>
 
               {!historyList || historyList.length === 0 ? (
-                <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-slate-800 text-xs text-slate-500">
-                  尚無歷史測試紀錄，執行一次 Run 後即會自動記錄。
+                <div className="flex h-52 flex-col items-center justify-center rounded-xl border border-dashed border-[#282d3a] text-sm text-zinc-400">
+                  尚無歷史測試紀錄，執行一次 Evaluate 後即會自動記錄。
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {historyList.map((entry) => {
                     const qKeys = Object.keys(
                       entry.requestPayload.questions || {}
@@ -470,12 +492,12 @@ export function PresetsAndHistoryModal({
                     return (
                       <div
                         key={entry.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3.5 transition hover:border-slate-700"
+                        className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[#262b38] bg-[#0d0e12] p-4 transition hover:border-[#353b4b]"
                       >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2.5">
                             <span
-                              className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${
+                              className={`telemetry-num rounded-md px-2 py-0.5 font-mono text-xs font-bold ${
                                 isSuccess
                                   ? 'bg-emerald-500/20 text-emerald-300'
                                   : 'bg-rose-500/20 text-rose-300'
@@ -483,28 +505,28 @@ export function PresetsAndHistoryModal({
                             >
                               {entry.primaryRun.status || 'ERR'}
                             </span>
-                            <span className="text-xs font-semibold text-slate-200">
+                            <span className="text-sm font-bold text-zinc-100">
                               {entry.profileName}
                             </span>
-                            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[11px] text-indigo-300">
+                            <span className="rounded-md bg-[#181b22] px-2 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-[#2b303d]">
                               {entry.model}
                             </span>
                             {entry.compareRun && (
-                              <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300">
-                                <Split className="h-3 w-3" />
+                              <span className="inline-flex items-center gap-1 rounded-md bg-sky-500/20 px-2 py-0.5 text-xs font-semibold text-sky-300">
+                                <Split className="h-3.5 w-3.5" />
                                 vs {entry.compareRun.profileName}
                               </span>
                             )}
-                            <span className="flex items-center gap-1 font-mono text-[11px] text-slate-400">
-                              <Clock className="h-3 w-3" />
+                            <span className="telemetry-num flex items-center gap-1 font-mono text-xs text-zinc-400">
+                              <Clock className="h-3.5 w-3.5" />
                               {entry.primaryRun.latencyMs} ms
                             </span>
-                            <span className="text-[11px] text-slate-500">
+                            <span className="text-xs text-zinc-500">
                               {new Date(entry.timestamp).toLocaleString()}
                             </span>
                           </div>
 
-                          <div className="truncate font-mono text-[11px] text-slate-400">
+                          <div className="truncate font-mono text-xs text-zinc-400">
                             Questions ({qKeys.length}): {qKeys.join(', ')} ·
                             State: {entry.stateText.slice(0, 90)}
                           </div>
@@ -514,7 +536,7 @@ export function PresetsAndHistoryModal({
                           <button
                             type="button"
                             onClick={() => handleRestoreHistory(entry)}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-zinc-950 hover:bg-amber-400"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
                             還原此狀態
@@ -523,7 +545,7 @@ export function PresetsAndHistoryModal({
                             <button
                               type="button"
                               onClick={() => deleteHistoryEntry(entry.id!)}
-                              className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+                              className="rounded-lg p-2 text-zinc-500 hover:bg-rose-500/20 hover:text-rose-300"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>

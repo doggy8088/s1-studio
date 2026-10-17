@@ -42,34 +42,41 @@ import {
   Check,
   ShieldCheck,
   Globe,
-  Eye,
-  EyeOff,
   AlertCircle,
   Loader2,
-  Sparkles,
   FileJson,
   Code2,
   Layers,
-  Clock,
+  Server,
+  KeyRound,
 } from 'lucide-react';
 
 export function S1StudioApp() {
   // -------------------------------------------------------------------------
-  // 1. Endpoint Profiles & Compare Mode State
+  // 1. Endpoint Profiles & Compare Mode State (Hydration-safe)
   // -------------------------------------------------------------------------
-  const [profiles, setProfiles] = useState<EndpointProfile[]>(() =>
-    loadProfilesFromLocalStorage()
+  const [profiles, setProfiles] = useState<EndpointProfile[]>(DEFAULT_PROFILES);
+  const [activeProfileId, setActiveProfileId] = useState<string>(
+    DEFAULT_PROFILES[0].id
   );
-  const [activeProfileId, setActiveProfileId] = useState<string>(() => {
-    const loaded = loadProfilesFromLocalStorage();
-    const saved = loadActiveProfileId();
-    return loaded.some((p) => p.id === saved) ? saved : loaded[0].id;
-  });
   const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
   const [compareProfileId, setCompareProfileId] = useState<string>(
     DEFAULT_PROFILES[3]?.id || DEFAULT_PROFILES[1].id
   );
-  const [showInlineApiKey, setShowInlineApiKey] = useState<boolean>(false);
+
+  // Hydrate saved profiles & activeProfileId on client mount to avoid SSR hydration mismatch
+  useEffect(() => {
+    queueMicrotask(() => {
+      const loaded = loadProfilesFromLocalStorage();
+      const saved = loadActiveProfileId();
+      setProfiles(loaded);
+      if (loaded.some((p) => p.id === saved)) {
+        setActiveProfileId(saved);
+      } else if (loaded[0]) {
+        setActiveProfileId(loaded[0].id);
+      }
+    });
+  }, []);
 
   // Modals
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -82,6 +89,9 @@ export function S1StudioApp() {
   // 2. Request Builder State (State, Images, Questions)
   // -------------------------------------------------------------------------
   const initialPreset = BUILT_IN_PRESETS[0];
+  const [activePresetId, setActivePresetId] = useState<string | null>(
+    initialPreset.id
+  );
   const [stateMode, setStateMode] = useState<'text' | 'json'>(
     initialPreset.stateMode
   );
@@ -196,74 +206,97 @@ export function S1StudioApp() {
   // -------------------------------------------------------------------------
   // 5. Execute Request (Single or A/B Parallel Compare)
   // -------------------------------------------------------------------------
-  const handleRunEvaluation = useCallback(async () => {
-    if (isRunning) return;
-    if (stateMode === 'json' && !stateJsonValidation.valid) {
-      return;
-    }
-    if (validationIssues.length > 0) {
-      return;
-    }
-
-    setIsRunning(true);
-    try {
-      if (isCompareMode && compareProfile) {
-        const [resA, resB] = await Promise.all([
-          executeSystemOneRequest(activeProfile, constructedPayload),
-          executeSystemOneRequest(
-            compareProfile,
-            constructedPayload,
-            compareProfile.defaultModel
-          ),
-        ]);
-        setPrimaryRun(resA);
-        setCompareRun(resB);
-
-        await addHistoryEntry({
-          timestamp: Date.now(),
-          profileName: activeProfile.name,
-          model: activeProfile.defaultModel || '(default)',
-          stateMode,
-          stateText,
-          imagesCount: images.length,
-          requestPayload: constructedPayload,
-          primaryRun: resA,
-          compareRun: resB,
-        });
-      } else {
-        const resA = await executeSystemOneRequest(
-          activeProfile,
-          constructedPayload
-        );
-        setPrimaryRun(resA);
-        setCompareRun(null);
-
-        await addHistoryEntry({
-          timestamp: Date.now(),
-          profileName: activeProfile.name,
-          model: activeProfile.defaultModel || '(default)',
-          stateMode,
-          stateText,
-          imagesCount: images.length,
-          requestPayload: constructedPayload,
-          primaryRun: resA,
-        });
+  const runWithProfile = useCallback(
+    async (targetProfile: EndpointProfile) => {
+      if (isRunning) return;
+      if (stateMode === 'json' && !stateJsonValidation.valid) {
+        return;
       }
-    } finally {
-      setIsRunning(false);
-    }
-  }, [
-    isRunning,
-    stateMode,
-    stateJsonValidation.valid,
-    validationIssues.length,
-    isCompareMode,
-    compareProfile,
-    activeProfile,
-    constructedPayload,
-    stateText,
-    images.length,
-  ]);
+      if (validationIssues.length > 0) {
+        return;
+      }
+
+      const payloadForTarget: S1RequestPayload = {
+        ...constructedPayload,
+        ...(targetProfile.defaultModel.trim()
+          ? { model: targetProfile.defaultModel.trim() }
+          : {}),
+      };
+
+      setIsRunning(true);
+      try {
+        if (isCompareMode && compareProfile) {
+          const [resA, resB] = await Promise.all([
+            executeSystemOneRequest(targetProfile, payloadForTarget),
+            executeSystemOneRequest(
+              compareProfile,
+              payloadForTarget,
+              compareProfile.defaultModel
+            ),
+          ]);
+          setPrimaryRun(resA);
+          setCompareRun(resB);
+
+          await addHistoryEntry({
+            timestamp: Date.now(),
+            profileName: targetProfile.name,
+            model: targetProfile.defaultModel || '(default)',
+            stateMode,
+            stateText,
+            imagesCount: images.length,
+            requestPayload: payloadForTarget,
+            primaryRun: resA,
+            compareRun: resB,
+          });
+        } else {
+          const resA = await executeSystemOneRequest(
+            targetProfile,
+            payloadForTarget
+          );
+          setPrimaryRun(resA);
+          setCompareRun(null);
+
+          await addHistoryEntry({
+            timestamp: Date.now(),
+            profileName: targetProfile.name,
+            model: targetProfile.defaultModel || '(default)',
+            stateMode,
+            stateText,
+            imagesCount: images.length,
+            requestPayload: payloadForTarget,
+            primaryRun: resA,
+          });
+        }
+      } finally {
+        setIsRunning(false);
+      }
+    },
+    [
+      isRunning,
+      stateMode,
+      stateJsonValidation.valid,
+      validationIssues.length,
+      constructedPayload,
+      isCompareMode,
+      compareProfile,
+      stateText,
+      images.length,
+    ]
+  );
+
+  const handleRunEvaluation = useCallback(async () => {
+    await runWithProfile(activeProfile);
+  }, [runWithProfile, activeProfile]);
+
+  const handleSwitchToSimulatorAndRun = useCallback(async () => {
+    const sim =
+      profiles.find((p) => p.id === 's1-builtin-simulator') ||
+      DEFAULT_PROFILES.find((p) => p.id === 's1-builtin-simulator');
+    if (!sim) return;
+    setActiveProfileId(sim.id);
+    saveActiveProfileId(sim.id);
+    await runWithProfile(sim);
+  }, [profiles, runWithProfile]);
 
   // Keyboard shortcut Cmd+Enter / Ctrl+Enter to Run
   useEffect(() => {
@@ -288,11 +321,13 @@ export function S1StudioApp() {
   };
 
   const applyPresetData = (data: {
+    presetId?: string;
     stateMode: 'text' | 'json';
     stateText: string;
     images?: UploadedImageItem[];
     questions: Record<string, S1Question>;
   }) => {
+    setActivePresetId(data.presetId ?? null);
     setStateMode(data.stateMode);
     setStateText(data.stateText);
     setImages(data.images || []);
@@ -300,45 +335,48 @@ export function S1StudioApp() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100 selection:bg-indigo-500/30">
+    <div className="flex min-h-screen flex-col bg-[#0b0c0e] text-zinc-100">
       {/* ================================================================= */}
-      {/* TOP NAVIGATION & ENDPOINT BAR                                     */}
+      {/* STICKY TIER 1: STUDIO BRAND BAR & PRIMARY ACTIONS                 */}
       {/* ================================================================= */}
-      <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-slate-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-3 px-4 py-2.5">
-          {/* Brand & Quick Preset Switcher */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-cyan-500 font-mono text-sm font-black text-white shadow">
-                S1
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-bold tracking-tight text-white">
-                    S1 Studio
-                  </span>
-                  <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-300">
-                    /v1/systemone
-                  </span>
-                </div>
-                <p className="hidden text-[10px] text-slate-400 sm:block">
-                  Vendor-Neutral Decision Primitives Sandbox
-                </p>
-              </div>
+      <header className="sticky top-0 z-30 border-b border-[#232732] bg-[#0b0c0e]/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-4 px-5 py-3">
+          {/* Brand Emblem + Title */}
+          <div className="flex items-center gap-3.5">
+            <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#2d3240] bg-[#0b0c0e] shadow-md">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/s1-app-icon-sm.png"
+                alt="S1 Studio Optical Prism Emblem"
+                className="h-full w-full object-cover"
+              />
             </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <span className="text-lg font-bold tracking-tight text-zinc-100">
+                  S1 Studio
+                </span>
+                <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-xs font-semibold text-amber-300">
+                  /v1/systemone
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Vendor-Neutral Structured Decision Primitives Workbench
+              </p>
+            </div>
+          </div>
 
-            <div className="h-5 w-px bg-slate-800" />
-
-            {/* Presets & History Triggers */}
+          {/* Right Action Cluster: Presets, History, Copy cURL, Evaluate */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() =>
                 setPresetsHistoryModal({ open: true, tab: 'presets' })
               }
-              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-indigo-500/50 hover:bg-slate-800"
+              className="flex items-center gap-2 rounded-xl border border-[#282d3a] bg-[#14171f] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:border-[#383f52] hover:bg-[#1b1f2a]"
             >
-              <Bookmark className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Presets 範本</span>
+              <Bookmark className="h-4 w-4 text-amber-400" />
+              <span>場景範本 Presets</span>
             </button>
 
             <button
@@ -346,18 +384,68 @@ export function S1StudioApp() {
               onClick={() =>
                 setPresetsHistoryModal({ open: true, tab: 'history' })
               }
-              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-indigo-500/50 hover:bg-slate-800"
+              className="flex items-center gap-2 rounded-xl border border-[#282d3a] bg-[#14171f] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:border-[#383f52] hover:bg-[#1b1f2a]"
             >
-              <History className="h-3.5 w-3.5 text-cyan-400" />
-              <span>History</span>
+              <History className="h-4 w-4 text-sky-400" />
+              <span>歷史紀錄 History</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleQuickCopyCurl}
+              className="flex items-center gap-2 rounded-xl border border-[#282d3a] bg-[#14171f] px-3.5 py-2 text-sm font-medium text-zinc-200 transition hover:border-[#383f52] hover:bg-[#1b1f2a]"
+              title="一鍵複製 curl -s ... | jq 指令"
+            >
+              {copiedCurlQuick ? (
+                <>
+                  <Check className="h-4 w-4 text-emerald-400" />
+                  <span className="text-emerald-300">已複製 cURL</span>
+                </>
+              ) : (
+                <>
+                  <Terminal className="h-4 w-4 text-zinc-400" />
+                  <span className="hidden sm:inline">cURL | jq</span>
+                </>
+              )}
+            </button>
+
+            {/* Primary Evaluate CTA */}
+            <button
+              type="button"
+              onClick={handleRunEvaluation}
+              disabled={
+                isRunning ||
+                (stateMode === 'json' && !stateJsonValidation.valid) ||
+                validationIssues.length > 0
+              }
+              className="flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2 text-sm font-bold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isRunning ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Evaluating...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 fill-current" />
+                  <span>Evaluate (⌘+↵)</span>
+                </>
+              )}
             </button>
           </div>
+        </div>
+      </header>
 
-          {/* Endpoint Profile Controls & Run Action */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Primary Profile Selector */}
-            <div className="flex items-center rounded-lg border border-slate-800 bg-slate-900 p-1">
-              <span className="px-2 text-[11px] font-medium text-slate-400">
+      {/* ================================================================= */}
+      {/* SUB-HEADER: ENDPOINT TELEMETRY BAR & SCENARIO QUICK-SWITCHER      */}
+      {/* ================================================================= */}
+      <div className="border-b border-[#1f232e] bg-[#101218]">
+        {/* Connection Strip */}
+        <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-3 px-5 py-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#262b38] bg-[#0b0c0e] px-3 py-1.5">
+              <Server className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-semibold text-zinc-400">
                 Profile:
               </span>
               <select
@@ -367,7 +455,7 @@ export function S1StudioApp() {
                   saveActiveProfileId(e.target.value);
                 }}
                 aria-label="Select active endpoint profile"
-                className="rounded bg-slate-950 px-2 py-1 text-xs font-semibold text-indigo-200 focus:outline-none"
+                className="rounded-lg bg-[#151821] px-2.5 py-1 text-sm font-semibold text-zinc-100 ring-1 ring-[#2a2f3d] focus:outline-none"
               >
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -376,51 +464,42 @@ export function S1StudioApp() {
                 ))}
               </select>
 
-              {/* Inline Model input */}
+              <div className="h-4 w-px bg-[#252934]" />
+
+              {/* Inline Model input with full width for clef-simulator / jev-1.13.0 */}
+              <span className="text-xs font-semibold text-zinc-400">
+                Model:
+              </span>
               <input
                 type="text"
+                list="s1-models-datalist"
                 value={activeProfile.defaultModel}
                 onChange={(e) =>
                   updateActiveProfileInline({ defaultModel: e.target.value })
                 }
-                placeholder="Model (e.g. clef)"
+                placeholder="clef / clef:cloud"
                 title="當前模型名稱 (Model Name)"
-                className="ml-1.5 w-28 rounded border border-slate-800 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                className="w-36 rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none"
               />
+              <datalist id="s1-models-datalist">
+                <option value="clef" />
+                <option value="clef-flash" />
+                <option value="clef:cloud" />
+                <option value="jev-1.13.0" />
+              </datalist>
 
-              {/* Inline API Key quick field */}
-              <div className="relative ml-1.5 hidden items-center lg:flex">
-                <input
-                  type={showInlineApiKey ? 'text' : 'password'}
-                  value={activeProfile.apiKey}
-                  onChange={(e) =>
-                    updateActiveProfileInline({ apiKey: e.target.value })
-                  }
-                  placeholder="API Key (選填)"
-                  className="w-28 rounded border border-slate-800 bg-slate-950 py-1 pr-6 pl-2 font-mono text-[11px] text-slate-300 focus:border-indigo-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowInlineApiKey((s) => !s)}
-                  className="absolute right-1.5 text-slate-500 hover:text-slate-300"
-                  title="顯示/隱藏 API Key"
-                >
-                  {showInlineApiKey ? (
-                    <EyeOff className="h-3 w-3" />
-                  ) : (
-                    <Eye className="h-3 w-3" />
-                  )}
-                </button>
-              </div>
-
-              {/* Manage Profiles Modal Button */}
+              {/* Manage Profiles & API Key Modal Button */}
               <button
                 type="button"
                 onClick={() => setIsProfileModalOpen(true)}
-                className="ml-1 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-                title="管理所有端點設定檔 (Endpoint Profiles)"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2b303d] bg-[#171a22] px-2.5 py-1 text-xs font-semibold text-zinc-200 transition hover:bg-[#222632] hover:text-zinc-100"
+                title="設定端點網址與 API Key (Endpoint Profiles)"
               >
-                <Settings2 className="h-3.5 w-3.5" />
+                <Settings2 className="h-3.5 w-3.5 text-amber-400" />
+                <span>端點與金鑰設定</span>
+                {activeProfile.apiKey && (
+                  <KeyRound className="h-3 w-3 text-emerald-400" />
+                )}
               </button>
             </div>
 
@@ -437,16 +516,16 @@ export function S1StudioApp() {
                   ? 'Proxy Mode: 透過內建無狀態 Edge API 轉發請求以解決 CORS 阻擋'
                   : 'Direct Mode: 由瀏覽器直接 fetch 呼叫目標端點'
               }
-              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition ${
                 activeProfile.useProxy
                   ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                  : 'border-[#282d3a] bg-[#14171f] text-zinc-300 hover:text-zinc-100'
               }`}
             >
               {activeProfile.useProxy ? (
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
               ) : (
-                <Globe className="h-3.5 w-3.5 text-amber-400" />
+                <Globe className="h-4 w-4 text-amber-400" />
               )}
               <span>Proxy: {activeProfile.useProxy ? 'ON' : 'OFF'}</span>
             </button>
@@ -455,14 +534,14 @@ export function S1StudioApp() {
             <button
               type="button"
               onClick={() => setIsCompareMode((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition ${
                 isCompareMode
-                  ? 'border-cyan-500/50 bg-cyan-500/20 text-cyan-200'
-                  : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                  ? 'border-sky-500/50 bg-sky-500/20 text-sky-200'
+                  : 'border-[#282d3a] bg-[#14171f] text-zinc-300 hover:text-zinc-100'
               }`}
               title="開啟 A/B 端點對比模式，平行發送請求至兩個 Profile"
             >
-              <Split className="h-3.5 w-3.5" />
+              <Split className="h-4 w-4 text-sky-400" />
               <span>A/B 對比</span>
             </button>
 
@@ -471,7 +550,7 @@ export function S1StudioApp() {
                 value={compareProfile.id}
                 onChange={(e) => setCompareProfileId(e.target.value)}
                 aria-label="Select secondary comparison endpoint profile"
-                className="rounded-lg border border-cyan-500/40 bg-cyan-950/50 px-2.5 py-1.5 text-xs font-semibold text-cyan-200 focus:outline-none"
+                className="rounded-xl border border-sky-500/40 bg-sky-950/40 px-3 py-2 text-xs font-bold text-sky-200 focus:outline-none"
               >
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -480,170 +559,137 @@ export function S1StudioApp() {
                 ))}
               </select>
             )}
-
-            {/* Quick Copy cURL | jq button */}
-            <button
-              type="button"
-              onClick={handleQuickCopyCurl}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800"
-              title="一鍵複製 curl -s ... | jq 指令"
-            >
-              {copiedCurlQuick ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  <span className="text-emerald-300">Copied cURL</span>
-                </>
-              ) : (
-                <>
-                  <Terminal className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="hidden xl:inline">cURL | jq</span>
-                </>
-              )}
-            </button>
-
-            {/* Primary Run Button */}
-            <button
-              type="button"
-              onClick={handleRunEvaluation}
-              disabled={
-                isRunning ||
-                (stateMode === 'json' && !stateJsonValidation.valid) ||
-                validationIssues.length > 0
-              }
-              className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-500 px-4 py-1.5 text-xs font-bold text-white shadow-lg shadow-indigo-600/25 transition hover:from-indigo-500 hover:to-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isRunning ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Evaluating...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="h-3.5 w-3.5 fill-current" />
-                  <span>Run (⌘+↵)</span>
-                </>
-              )}
-            </button>
           </div>
+
+          {/* Right: Target Endpoint URL readout inline */}
+          <button
+            type="button"
+            onClick={() => setIsProfileModalOpen(true)}
+            title="點擊設定端點網址 (Endpoint Base URL)"
+            className="hidden items-center gap-1.5 rounded-lg border border-[#252934] bg-[#0b0c0e] px-2.5 py-1.5 font-mono text-xs text-zinc-300 transition hover:border-[#383f52] hover:text-zinc-100 xl:flex"
+          >
+            <span className="font-sans text-zinc-500">POST</span>
+            <span className="max-w-[260px] truncate">
+              {activeProfile.baseUrl.replace(/\/+$/, '')}/v1/systemone
+            </span>
+          </button>
         </div>
 
-        {/* Quick Built-in Preset Bar */}
-        <div className="border-t border-slate-900 bg-slate-950/80 px-4 py-1.5">
-          <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-2 text-[11px]">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="flex items-center gap-1 font-medium text-slate-400">
-                <Sparkles className="h-3 w-3 text-amber-400" />
-                快速載入測試場景：
-              </span>
-              {BUILT_IN_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() =>
-                    applyPresetData({
-                      stateMode: preset.stateMode,
-                      stateText: preset.stateText,
-                      images: preset.images || [],
-                      questions: preset.questions,
-                    })
-                  }
-                  className="rounded-md border border-slate-800/90 bg-slate-900/90 px-2 py-0.5 text-slate-300 transition hover:border-indigo-500/50 hover:bg-indigo-500/15 hover:text-indigo-200"
-                >
-                  {preset.name.split(' (')[0]}
-                </button>
-              ))}
-            </div>
+          {/* Scenario Quick-Switcher Strip */}
+          <div className="border-t border-[#1b1f28] bg-[#0d0f14] px-5 py-2">
+            <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-zinc-400">
+                  快速載入測試場景：
+                </span>
+                {BUILT_IN_PRESETS.map((preset) => {
+                  const isSelected = activePresetId === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        applyPresetData({
+                          presetId: preset.id,
+                          stateMode: preset.stateMode,
+                          stateText: preset.stateText,
+                          images: preset.images || [],
+                          questions: preset.questions,
+                        })
+                      }
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium transition ${
+                        isSelected
+                          ? 'border-amber-500/50 bg-amber-500/15 font-semibold text-amber-200'
+                          : 'border-[#242834] bg-[#14171f] text-zinc-300 hover:border-[#353b4b] hover:text-zinc-100'
+                      }`}
+                    >
+                      {preset.name.split(' (')[0]}
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="flex items-center gap-2 text-slate-500">
-              <span>
-                當前目標：
-                <code className="ml-1 font-mono text-slate-300">
-                  {activeProfile.baseUrl.replace(/\/+$/, '')}/v1/systemone
-                </code>
-              </span>
+              <code className="hidden rounded border border-[#222632] bg-[#0b0c0e] px-2 py-0.5 font-mono text-xs text-zinc-400 md:inline xl:hidden">
+                {activeProfile.baseUrl.replace(/\/+$/, '')}/v1/systemone
+              </code>
             </div>
           </div>
         </div>
-      </header>
 
       {/* ================================================================= */}
       {/* MAIN TWO-COLUMN DESKTOP WORKSPACE                                 */}
       {/* ================================================================= */}
-      <main className="mx-auto grid w-full max-w-[1680px] flex-1 grid-cols-1 gap-5 p-4 lg:grid-cols-12">
+      <main className="bg-instrument-grid mx-auto grid w-full max-w-[1720px] flex-1 grid-cols-1 items-start gap-6 p-5 lg:grid-cols-12">
         {/* --------------------------------------------------------------- */}
         {/* LEFT COLUMN: REQUEST BUILDER (State + Multimodal + Questions)   */}
         {/* --------------------------------------------------------------- */}
-        <section className="space-y-4 lg:col-span-6">
-          {/* 1. State Input Card */}
-          <div className="rounded-xl border border-slate-800/90 bg-slate-900/50 p-4 shadow">
-            <div className="mb-2.5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-semibold tracking-wide text-slate-200 uppercase">
-                  State 狀態輸入
-                </h2>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
-                  {stateMode === 'json'
-                    ? 'JSON Object / Array'
-                    : 'Plain Text String'}
+        <section className="space-y-5 lg:col-span-6">
+          {/* 01. State Input Card */}
+          <div className="rounded-2xl border border-[#232730] bg-[#12141a] p-5 shadow-sm">
+            <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[#2c313d] bg-[#171a21] font-mono text-xs font-bold text-amber-400">
+                  01
                 </span>
+                <div>
+                  <h2 className="text-base font-semibold tracking-tight text-zinc-100">
+                    State Context 狀態輸入
+                  </h2>
+                </div>
               </div>
 
               {/* Text | JSON Mode Switcher */}
-              <div className="inline-flex rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+              <div className="inline-flex rounded-lg border border-[#282c37] bg-[#0d0e12] p-1">
                 <button
                   type="button"
                   onClick={() => setStateMode('text')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                     stateMode === 'text'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  Text Mode
+                  Text 純文字
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    // Format nicely if valid JSON, otherwise wrap string into JSON object if plain text
-                    if (stateMode === 'text') {
-                      try {
-                        JSON.parse(stateText);
-                      } catch {
-                        // Keep raw text so user can edit or wrap
-                      }
-                    }
-                    setStateMode('json');
-                  }}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  onClick={() => setStateMode('json')}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                     stateMode === 'json'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  JSON Mode
+                  JSON 結構
                 </button>
               </div>
             </div>
 
             {stateMode === 'text' ? (
               <textarea
-                rows={5}
+                rows={4}
                 value={stateText}
-                onChange={(e) => setStateText(e.target.value)}
+                onChange={(e) => {
+                  setStateText(e.target.value);
+                  setActivePresetId(null);
+                }}
                 placeholder="輸入待評估的純文字狀態 (State)..."
-                className="w-full rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-xs leading-relaxed text-slate-100 focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl border border-[#282d39] bg-[#0d0e12] p-4 font-mono text-sm leading-relaxed text-zinc-100 transition focus:border-amber-500/70 focus:outline-none"
               />
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <JsonCodeEditor
                   value={stateText}
-                  onChange={setStateText}
-                  minHeight="130px"
+                  onChange={(val) => {
+                    setStateText(val);
+                    setActivePresetId(null);
+                  }}
+                  minHeight="135px"
                   maxHeight="320px"
                 />
                 {!stateJsonValidation.valid && (
-                  <div className="flex items-center justify-between gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                    <div className="flex items-center gap-2">
                       <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
                       <span>
                         JSON 格式錯誤：{stateJsonValidation.error}
@@ -656,7 +702,7 @@ export function S1StudioApp() {
                           JSON.stringify({ content: stateText }, null, 2)
                         )
                       }
-                      className="shrink-0 rounded bg-rose-500/20 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/30"
+                      className="shrink-0 rounded-lg bg-rose-500/20 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/30"
                     >
                       自動封裝為 JSON 物件
                     </button>
@@ -666,11 +712,11 @@ export function S1StudioApp() {
             )}
           </div>
 
-          {/* 2. Multimodal Images Dropzone */}
+          {/* 02. Multimodal Images Dropzone (Compact when 0 images) */}
           <ImageDropzone images={images} onChange={setImages} />
 
-          {/* 3. Questions Builder */}
-          <div className="rounded-xl border border-slate-800/90 bg-slate-900/50 p-4 shadow">
+          {/* 03. Questions Builder */}
+          <div className="rounded-2xl border border-[#232730] bg-[#12141a] p-5 shadow-sm">
             <QuestionsBuilder
               items={questionItems}
               onChange={setQuestionItems}
@@ -678,12 +724,12 @@ export function S1StudioApp() {
 
             {/* Validation Issues Summary */}
             {validationIssues.length > 0 && (
-              <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
-                <div className="flex items-center gap-1.5 font-semibold text-rose-300">
+              <div className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">
+                <div className="flex items-center gap-2 font-semibold text-rose-300">
                   <AlertCircle className="h-4 w-4" />
                   請修正以下問題設定後再發送請求：
                 </div>
-                <ul className="mt-1.5 list-inside list-disc space-y-1 text-[11px]">
+                <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
                   {validationIssues.map((iss, idx) => (
                     <li key={idx}>{iss.message}</li>
                   ))}
@@ -696,72 +742,56 @@ export function S1StudioApp() {
         {/* --------------------------------------------------------------- */}
         {/* RIGHT COLUMN: EVALUATION RESULTS, RAW PAYLOAD & CODE EXPORTER   */}
         {/* --------------------------------------------------------------- */}
-        <section className="space-y-4 lg:col-span-6">
-          <div className="rounded-xl border border-slate-800/90 bg-slate-900/50 p-4 shadow">
-            {/* Status Bar & Right View Switcher */}
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-xs font-semibold tracking-wide text-slate-200 uppercase">
-                  Evaluation Results 評估結果
+        <section className="space-y-5 lg:sticky lg:top-20 lg:col-span-6">
+          <div className="rounded-2xl border border-[#232730] bg-[#12141a] p-5 shadow-sm">
+            {/* Single-Row Header: 04 Title + View Switcher Tabs */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#232732] pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[#2c313d] bg-[#171a21] font-mono text-xs font-bold text-amber-400">
+                  04
+                </span>
+                <h2 className="text-base font-semibold tracking-tight text-zinc-100">
+                  Telemetry 評估診斷結果
                 </h2>
-
-                {primaryRun && (
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs font-bold ${
-                        primaryRun.status >= 200 && primaryRun.status < 300
-                          ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40'
-                          : 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40'
-                      }`}
-                    >
-                      Status: {primaryRun.status || 'ERR'}{' '}
-                      {primaryRun.statusText}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-0.5 font-mono text-xs text-slate-300">
-                      <Clock className="h-3 w-3 text-indigo-400" />
-                      Latency: {primaryRun.latencyMs} ms
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Tabs: Visual Cards | Raw Response | Code Exporter */}
-              <div className="inline-flex rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+              <div className="inline-flex rounded-lg border border-[#282c37] bg-[#0d0e12] p-1">
                 <button
                   type="button"
                   onClick={() => setRightTab('visual')}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition sm:text-sm ${
                     rightTab === 'visual'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <Layers className="h-3.5 w-3.5" />
-                  Visual Cards
+                  <Layers className="h-3.5 w-3.5 text-amber-400" />
+                  視覺診斷卡
                 </button>
                 <button
                   type="button"
                   onClick={() => setRightTab('raw')}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition sm:text-sm ${
                     rightTab === 'raw'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <FileJson className="h-3.5 w-3.5" />
-                  Raw Payload
+                  <FileJson className="h-3.5 w-3.5 text-sky-400" />
+                  Raw JSON
                 </button>
                 <button
                   type="button"
                   onClick={() => setRightTab('code')}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition sm:text-sm ${
                     rightTab === 'code'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#222631] text-zinc-100 shadow-sm ring-1 ring-[#353b49]'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <Code2 className="h-3.5 w-3.5" />
-                  Code Exporter
+                  <Code2 className="h-3.5 w-3.5 text-emerald-400" />
+                  匯出程式碼
                 </button>
               </div>
             </div>
@@ -777,14 +807,18 @@ export function S1StudioApp() {
                 onThresholdChange={(key, val) =>
                   setNoulThresholds((prev) => ({ ...prev, [key]: val }))
                 }
+                onRunNow={handleRunEvaluation}
+                onSwitchToSimulator={handleSwitchToSimulatorAndRun}
+                onOpenProfileSettings={() => setIsProfileModalOpen(true)}
+                isRunning={isRunning}
               />
             )}
 
             {rightTab === 'raw' && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-semibold text-slate-300">
+                  <div className="mb-2 flex items-center justify-between text-sm text-zinc-300">
+                    <span className="font-semibold">
                       Raw Request Payload (`POST /v1/systemone`)
                     </span>
                     <CopyTextButton
@@ -794,14 +828,14 @@ export function S1StudioApp() {
                   <JsonCodeEditor
                     value={JSON.stringify(constructedPayload, null, 2)}
                     readOnly
-                    minHeight="180px"
-                    maxHeight="320px"
+                    minHeight="200px"
+                    maxHeight="340px"
                   />
                 </div>
 
                 <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-semibold text-slate-300">
+                  <div className="mb-2 flex items-center justify-between text-sm text-zinc-300">
+                    <span className="font-semibold">
                       Raw Response Body ({primaryRun?.profileName || 'Primary'})
                     </span>
                     {primaryRun?.rawResponseText && (
@@ -822,17 +856,17 @@ export function S1StudioApp() {
                               return primaryRun.rawResponseText;
                             }
                           })()
-                        : '// 尚未執行請求，點擊右上角 Run (⌘+↵) 後顯示回應內容'
+                        : '// 尚未執行請求，點擊右上角 Evaluate (⌘+↵) 後顯示回應內容'
                     }
                     readOnly
-                    minHeight="180px"
-                    maxHeight="360px"
+                    minHeight="200px"
+                    maxHeight="380px"
                   />
                 </div>
 
                 {isCompareMode && compareRun && (
                   <div>
-                    <div className="mb-1.5 flex items-center justify-between text-xs text-cyan-300">
+                    <div className="mb-2 flex items-center justify-between text-sm text-sky-300">
                       <span className="font-semibold">
                         Raw Response Body ([Compare] {compareRun.profileName})
                       </span>
@@ -857,8 +891,8 @@ export function S1StudioApp() {
                           : '// 無回應內容'
                       }
                       readOnly
-                      minHeight="160px"
-                      maxHeight="320px"
+                      minHeight="180px"
+                      maxHeight="340px"
                     />
                   </div>
                 )}
@@ -879,39 +913,39 @@ export function S1StudioApp() {
       {/* ================================================================= */}
       {/* FOOTER: VERSION INFO & COPYRIGHT                                  */}
       {/* ================================================================= */}
-      <footer className="mt-auto border-t border-slate-900 bg-slate-950/90 py-3.5 text-xs text-slate-400">
-        <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-3 px-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-slate-200">S1 Studio</span>
-            <span className="rounded bg-slate-800/90 px-2 py-0.5 font-mono text-[11px] text-indigo-300 ring-1 ring-slate-700/80">
+      <footer className="mt-auto border-t border-[#1e222b] bg-[#0b0c0e] py-4 text-sm text-zinc-400">
+        <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-3 px-5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="font-bold text-zinc-100">S1 Studio</span>
+            <span className="telemetry-num rounded-md border border-[#2b303d] bg-[#14171f] px-2.5 py-0.5 font-mono text-xs font-medium text-amber-300">
               v{process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0'}
               {process.env.NEXT_PUBLIC_GIT_SHA
                 ? ` (${process.env.NEXT_PUBLIC_GIT_SHA})`
                 : ''}
             </span>
-            <span className="hidden text-slate-600 sm:inline">·</span>
+            <span className="hidden text-zinc-600 sm:inline">·</span>
             <a
               href="https://github.com/doggy8088/s1-studio"
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden text-slate-400 underline-offset-4 hover:text-indigo-300 hover:underline sm:inline"
+              className="hidden text-zinc-400 underline-offset-4 transition hover:text-amber-300 hover:underline sm:inline"
             >
               GitHub Repository
             </a>
           </div>
 
-          <div className="flex items-center gap-1.5 text-slate-400">
+          <div className="flex items-center gap-1.5 text-zinc-400">
             <span>Copyright © 2026</span>
             <a
               href="https://blog.miniasp.com/"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold text-slate-200 underline-offset-4 hover:text-indigo-300 hover:underline"
+              className="font-semibold text-zinc-100 underline-offset-4 transition hover:text-amber-300 hover:underline"
             >
               Will 保哥
             </a>
-            <span className="text-slate-600">·</span>
-            <span className="text-slate-500">All rights reserved.</span>
+            <span className="text-zinc-600">·</span>
+            <span className="text-zinc-500">All rights reserved.</span>
           </div>
         </div>
       </footer>
@@ -954,16 +988,16 @@ function CopyTextButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#161922] px-3 py-1 text-xs font-medium text-zinc-200 transition hover:bg-[#202430]"
     >
       {copied ? (
         <>
-          <Check className="h-3 w-3 text-emerald-400" />
+          <Check className="h-3.5 w-3.5 text-emerald-400" />
           Copied
         </>
       ) : (
         <>
-          <Copy className="h-3 w-3" />
+          <Copy className="h-3.5 w-3.5" />
           Copy JSON
         </>
       )}
