@@ -18,4 +18,5 @@ if [ -d "src/app/api" ]; then
   mv src/app/api "$BACKUP_DIR/api"
 fi
 
+rm -rf .next/dev/types .next/types
 STATIC_EXPORT=1 bun run build
