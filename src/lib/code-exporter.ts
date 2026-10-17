@@ -82,13 +82,18 @@ function normalizePayloadForProfile(
   profile: EndpointProfile,
   payload: S1RequestPayload
 ): S1RequestPayload {
-  if (!isCloudflareProfile(profile)) return payload;
-  const modelToUse = payload.model || profile.defaultModel;
+  const rawModel = (payload.model || profile.defaultModel || '')
+    .trim()
+    .replace(/\s*\(尚未下載\)\s*$/, '');
+  if (!isCloudflareProfile(profile)) {
+    return {
+      ...payload,
+      ...(rawModel ? { model: rawModel } : {}),
+    };
+  }
   return {
     ...payload,
-    ...(modelToUse
-      ? { model: getCloudflarePayloadModelSelector(modelToUse) }
-      : {}),
+    ...(rawModel ? { model: getCloudflarePayloadModelSelector(rawModel) } : {}),
   };
 }
 

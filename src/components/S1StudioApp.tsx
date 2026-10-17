@@ -18,16 +18,20 @@ import {
   saveProfilesToLocalStorage,
 } from '@/lib/db';
 import {
+  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL,
   buildCloudflareEndpointUrl,
   builderItemsToQuestionsRecord,
   executeSystemOneRequest,
   extractCloudflareAccountId,
   fetchModelsForProfile,
   formatEndpointPreviewUrl,
+  getCachedModelsForProfile,
   getDefaultModelsForProfile,
   getSelectableModelsForProfile,
   isCloudflareProfile,
+  isLocalOllamaProfile,
   isProfileEndpointAndKeyValid,
+  pullLocalOllamaModel,
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
@@ -60,6 +64,7 @@ import {
   Layers,
   Server,
   KeyRound,
+  Download,
 } from 'lucide-react';
 
 export function S1StudioApp() {
@@ -168,43 +173,116 @@ export function S1StudioApp() {
   const [discoveredModelsByProfile, setDiscoveredModelsByProfile] = useState<
     Record<string, string[]>
   >({});
+  const [pullingInlineClef, setPullingInlineClef] = useState(false);
+  const [pullInlineStatus, setPullInlineStatus] = useState<string | null>(null);
 
-  const isActiveEndpointAndKeyValid = useMemo(
-    () => isProfileEndpointAndKeyValid(activeProfile),
+  const isActiveLocalOllama = useMemo(
+    () => isLocalOllamaProfile(activeProfile),
     [activeProfile]
   );
 
+  const activeDiscoveredModels = useMemo(
+    () =>
+      discoveredModelsByProfile[activeProfile.id] ??
+      (!isActiveLocalOllama
+        ? getCachedModelsForProfile(activeProfile)
+        : undefined),
+    [discoveredModelsByProfile, activeProfile, isActiveLocalOllama]
+  );
+
+  const isActiveEndpointAndKeyValid = useMemo(
+    () => isProfileEndpointAndKeyValid(activeProfile, activeDiscoveredModels),
+    [activeProfile, activeDiscoveredModels]
+  );
+
   useEffect(() => {
-    if (!isActiveEndpointAndKeyValid) return;
+    const url = activeProfile.baseUrl.trim();
     if (
-      isCloudflareProfile(activeProfile) ||
-      activeProfile.baseUrl.trim().startsWith('/api/')
+      !url ||
+      url.startsWith('/api/') ||
+      isCloudflareProfile(activeProfile)
     ) {
       return;
     }
+    const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+    const hasKey = Boolean(
+      activeProfile.apiKey && activeProfile.apiKey.trim().length > 0
+    );
+    if (!isLocalhost && !hasKey) return;
+
+    if (!isActiveLocalOllama) {
+      const cached = getCachedModelsForProfile(activeProfile);
+      if (cached && cached.length > 0) {
+        return;
+      }
+    }
+
     let cancelled = false;
     const timer = setTimeout(async () => {
-      const models = await fetchModelsForProfile(activeProfile);
-      if (!cancelled && models.length > 0) {
-        setDiscoveredModelsByProfile((prev) => ({
-          ...prev,
-          [activeProfile.id]: models,
-        }));
+      const models = await fetchModelsForProfile(activeProfile, {
+        forceRefresh: isActiveLocalOllama,
+      });
+      if (cancelled) return;
+      setDiscoveredModelsByProfile((prev) => ({
+        ...prev,
+        [activeProfile.id]: models,
+      }));
+      if (isActiveLocalOllama) {
+        const nextDefault =
+          models.length === 0
+            ? LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL
+            : activeProfile.defaultModel ===
+                  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL ||
+                !models.includes(activeProfile.defaultModel)
+              ? models[0]
+              : activeProfile.defaultModel;
+        if (nextDefault !== activeProfile.defaultModel) {
+          setProfiles((curr) => {
+            const updated = curr.map((p) =>
+              p.id === activeProfile.id ? { ...p, defaultModel: nextDefault } : p
+            );
+            saveProfilesToLocalStorage(updated);
+            return updated;
+          });
+        }
       }
-    }, 300);
+    }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [isActiveEndpointAndKeyValid, activeProfile]);
+  }, [activeProfile, isActiveLocalOllama]);
+
+  const handleInlinePullClef = async () => {
+    if (pullingInlineClef) return;
+    setPullingInlineClef(true);
+    setPullInlineStatus('拉取中...');
+    try {
+      await pullLocalOllamaModel(activeProfile, 'clef', (status, pct) => {
+        setPullInlineStatus(
+          pct !== undefined ? `${status} (${pct}%)` : status
+        );
+      });
+      const models = await fetchModelsForProfile(activeProfile, {
+        forceRefresh: true,
+      });
+      setDiscoveredModelsByProfile((prev) => ({
+        ...prev,
+        [activeProfile.id]: models,
+      }));
+      const nextModel = models[0] || 'clef';
+      updateActiveProfileInline({ defaultModel: nextModel });
+      setPullInlineStatus(null);
+    } catch {
+      setIsProfileModalOpen(true);
+    } finally {
+      setPullingInlineClef(false);
+    }
+  };
 
   const activeSelectableModels = useMemo(
-    () =>
-      getSelectableModelsForProfile(
-        activeProfile,
-        discoveredModelsByProfile[activeProfile.id]
-      ),
-    [activeProfile, discoveredModelsByProfile]
+    () => getSelectableModelsForProfile(activeProfile, activeDiscoveredModels),
+    [activeProfile, activeDiscoveredModels]
   );
 
   // -------------------------------------------------------------------------
@@ -545,6 +623,34 @@ export function S1StudioApp() {
                     </option>
                   ))}
                 </select>
+              ) : isActiveLocalOllama ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL}
+                    title="本機 Ollama 尚未下載 clef 模型"
+                    className="w-40 rounded-lg border border-amber-500/40 bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleInlinePullClef()}
+                    disabled={pullingInlineClef}
+                    title="透過 HTTP 呼叫本機 Ollama REST API (POST /api/pull) 直接拉取 clef 模型"
+                    className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/25 disabled:opacity-50"
+                  >
+                    {pullingInlineClef ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    <span>
+                      {pullingInlineClef
+                        ? pullInlineStatus || '拉取中...'
+                        : '拉取 clef 模型'}
+                    </span>
+                  </button>
+                </div>
               ) : (
                 <>
                   <input

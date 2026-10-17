@@ -10,14 +10,18 @@ import {
 } from '@/lib/presets';
 import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
+  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL,
   buildCloudflareEndpointUrl,
   extractCloudflareAccountId,
   fetchModelsForProfile,
+  getCachedModelsForProfile,
   getDefaultModelsForProfile,
   getSelectableModelsForProfile,
   isCloudflareProfile,
+  isLocalOllamaProfile,
   isProfileEndpointAndKeyValid,
   normalizeCloudflareModelId,
+  pullLocalOllamaModel,
 } from '@/lib/s1-utils';
 import {
   Plus,
@@ -31,6 +35,8 @@ import {
   RotateCcw,
   Lock,
   RefreshCw,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
 interface ProfileManagerModalProps {
@@ -60,6 +66,9 @@ export function ProfileManagerModal({
     Record<string, string[]>
   >({});
   const [loadingModelsId, setLoadingModelsId] = useState<string | null>(null);
+  const [pullingClef, setPullingClef] = useState(false);
+  const [pullStatusText, setPullStatusText] = useState<string | null>(null);
+  const [pullErrorText, setPullErrorText] = useState<string | null>(null);
 
   const currentSyncKey = `${isOpen}:${activeProfileId}`;
   if (currentSyncKey !== prevSyncKey) {
@@ -74,6 +83,7 @@ export function ProfileManagerModal({
 
   const isBuiltInProfile = BUILT_IN_PROFILE_IDS.has(currentProfile.id);
   const isCf = isCloudflareProfile(currentProfile);
+  const isLocalOllama = isLocalOllamaProfile(currentProfile);
   const cfAccountId = isCf ? extractCloudflareAccountId(currentProfile) : '';
 
   const canFetchRemoteModels = useMemo(() => {
@@ -88,35 +98,87 @@ export function ProfileManagerModal({
     return isLocalhost || hasKey;
   }, [isCf, currentProfile.baseUrl, currentProfile.apiKey]);
 
-  const loadModels = useCallback(async (profileToFetch: EndpointProfile) => {
-    setLoadingModelsId(profileToFetch.id);
-    try {
-      const models = await fetchModelsForProfile(profileToFetch);
-      if (models.length > 0) {
+  const loadModels = useCallback(
+    async (profileToFetch: EndpointProfile, forceRefresh = false) => {
+      setLoadingModelsId(profileToFetch.id);
+      try {
+        const models = await fetchModelsForProfile(profileToFetch, {
+          forceRefresh,
+        });
         setDiscoveredModelsByProfile((prev) => ({
           ...prev,
           [profileToFetch.id]: models,
         }));
+
+        if (isLocalOllamaProfile(profileToFetch)) {
+          const targetDefault =
+            models.length === 0
+              ? LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL
+              : profileToFetch.defaultModel ===
+                    LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL ||
+                  !models.includes(profileToFetch.defaultModel)
+                ? models[0]
+                : profileToFetch.defaultModel;
+          if (targetDefault !== profileToFetch.defaultModel) {
+            onSaveProfiles(
+              profiles.map((p) =>
+                p.id === profileToFetch.id
+                  ? { ...p, defaultModel: targetDefault }
+                  : p
+              )
+            );
+          }
+        }
+      } finally {
+        setLoadingModelsId((curr) =>
+          curr === profileToFetch.id ? null : curr
+        );
       }
-    } finally {
-      setLoadingModelsId((curr) =>
-        curr === profileToFetch.id ? null : curr
-      );
-    }
-  }, []);
+    },
+    [onSaveProfiles, profiles]
+  );
 
   useEffect(() => {
     if (!isOpen || !canFetchRemoteModels) return;
+    if (!isLocalOllama) {
+      const cached = getCachedModelsForProfile(currentProfile);
+      if (cached && cached.length > 0) {
+        return;
+      }
+    }
     const timer = setTimeout(() => {
-      void loadModels(currentProfile);
-    }, 350);
+      void loadModels(currentProfile, isLocalOllama);
+    }, 250);
     return () => clearTimeout(timer);
-  }, [
-    isOpen,
-    canFetchRemoteModels,
-    currentProfile,
-    loadModels,
-  ]);
+  }, [isOpen, canFetchRemoteModels, isLocalOllama, currentProfile, loadModels]);
+
+  const handlePullLocalClef = async () => {
+    if (pullingClef) return;
+    setPullingClef(true);
+    setPullErrorText(null);
+    setPullStatusText('正在連線至本機 Ollama REST API (POST /api/pull)...');
+    try {
+      await pullLocalOllamaModel(currentProfile, 'clef', (status, pct) => {
+        setPullStatusText(
+          pct !== undefined
+            ? `正在拉取 clef 模型：${status} (${pct}%)`
+            : `正在拉取 clef 模型：${status}`
+        );
+      });
+      setPullStatusText('clef 模型拉取完成！正在更新模型清單...');
+      await loadModels(currentProfile, true);
+      setPullStatusText(null);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : '無法連線至本機 Ollama';
+      setPullErrorText(
+        `拉取失敗：${msg}（請確認本機已啟動 ollama serve）`
+      );
+      setPullStatusText(null);
+    } finally {
+      setPullingClef(false);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -129,15 +191,22 @@ export function ProfileManagerModal({
 
   if (!isOpen) return null;
 
-  const isEndpointAndKeyValid = isProfileEndpointAndKeyValid(currentProfile);
+  const currentDiscoveredModels =
+    discoveredModelsByProfile[currentProfile.id] ??
+    (!isLocalOllama ? getCachedModelsForProfile(currentProfile) : undefined);
+
+  const isEndpointAndKeyValid = isProfileEndpointAndKeyValid(
+    currentProfile,
+    currentDiscoveredModels
+  );
   const commonModelsList = isCf
     ? [...CLOUDFLARE_BUILT_IN_MODELS]
-    : discoveredModelsByProfile[currentProfile.id]?.length
-      ? discoveredModelsByProfile[currentProfile.id]
+    : currentDiscoveredModels?.length
+      ? currentDiscoveredModels
       : getDefaultModelsForProfile(currentProfile);
   const selectableModels = getSelectableModelsForProfile(
     currentProfile,
-    discoveredModelsByProfile[currentProfile.id]
+    currentDiscoveredModels
   );
 
   const handleUpdateCurrent = (patch: Partial<EndpointProfile>) => {
@@ -481,7 +550,7 @@ export function ProfileManagerModal({
                 {canFetchRemoteModels && (
                   <button
                     type="button"
-                    onClick={() => void loadModels(currentProfile)}
+                    onClick={() => void loadModels(currentProfile, true)}
                     disabled={loadingModelsId === currentProfile.id}
                     className="inline-flex items-center gap-1 text-xs font-medium text-amber-300/90 transition hover:text-amber-200 disabled:opacity-50"
                     title="從 /models 端點重新載入並篩選 clef / jev 相關模型"
@@ -496,8 +565,8 @@ export function ProfileManagerModal({
                     <span>
                       {loadingModelsId === currentProfile.id
                         ? '正在查詢 /models...'
-                        : discoveredModelsByProfile[currentProfile.id]?.length
-                          ? `已從 /models 篩選 (${discoveredModelsByProfile[currentProfile.id].length})`
+                        : currentDiscoveredModels?.length
+                          ? `已從 /models 篩選 (${currentDiscoveredModels.length})`
                           : '從 /models 取得模型'}
                     </span>
                   </button>
@@ -518,6 +587,41 @@ export function ProfileManagerModal({
                     </option>
                   ))}
                 </select>
+              ) : isLocalOllama ? (
+                <>
+                  <input
+                    type="text"
+                    readOnly
+                    value={LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL}
+                    aria-label="Local Ollama model status"
+                    className="mt-1.5 w-full rounded-xl border border-amber-500/40 bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-amber-300 focus:outline-none"
+                  />
+                  <div className="mt-2.5 flex flex-col gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void handlePullLocalClef()}
+                      disabled={pullingClef}
+                      className="inline-flex w-fit items-center gap-1.5 text-xs font-semibold text-amber-400 underline decoration-amber-400/50 underline-offset-4 transition hover:text-amber-300 disabled:opacity-50"
+                    >
+                      {pullingClef ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      <span>
+                        {pullingClef
+                          ? pullStatusText ||
+                            '正在透過 HTTP REST API 拉取 clef 模型...'
+                          : '點此透過 HTTP 呼叫 REST API (POST /api/pull) 直接拉取 clef 模型'}
+                      </span>
+                    </button>
+                    {pullErrorText && (
+                      <span className="text-xs text-rose-400">
+                        {pullErrorText}
+                      </span>
+                    )}
+                  </div>
+                </>
               ) : (
                 <>
                   <input
@@ -567,9 +671,7 @@ export function ProfileManagerModal({
                   <div>
                     <div className="text-sm font-semibold text-zinc-100">
                       CORS 發送模式：
-                      {currentProfile.useProxy
-                        ? 'Proxy Mode (無狀態 Edge 代理轉發)'
-                        : 'Direct Mode (瀏覽器直接連線)'}
+                      {currentProfile.useProxy ? 'Proxy Mode' : 'Direct Mode'}
                     </div>
                     <div className="mt-1 text-xs leading-relaxed text-zinc-400">
                       {currentProfile.useProxy

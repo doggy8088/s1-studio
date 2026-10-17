@@ -90,6 +90,39 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Action: Pull model via Ollama HTTP REST API (POST /api/pull)
+    if (proxyAction === 'ollama-pull') {
+      const rootBase = cleanedBase
+        .replace(/\/v1\/systemone$/i, '')
+        .replace(/\/v1$/i, '')
+        .replace(/\/+$/, '');
+      const pullUrl = `${rootBase}/api/pull`;
+      const bodyText = await req.text();
+
+      const forwardHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (authHeader && authHeader.trim().length > 0) {
+        forwardHeaders['Authorization'] = authHeader;
+      }
+
+      const upstreamRes = await fetch(pullUrl, {
+        method: 'POST',
+        headers: forwardHeaders,
+        body: bodyText || JSON.stringify({ model: 'clef', stream: true }),
+      });
+
+      return new NextResponse(upstreamRes.body, {
+        status: upstreamRes.status,
+        statusText: upstreamRes.statusText,
+        headers: {
+          'Content-Type':
+            upstreamRes.headers.get('Content-Type') || 'application/x-ndjson',
+        },
+      });
+    }
+
     // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ endpoint)
     const targetEndpoint =
       cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')

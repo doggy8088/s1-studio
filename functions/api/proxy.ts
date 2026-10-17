@@ -116,6 +116,56 @@ export const onRequestPost = async (context: { request: Request }) => {
       );
     }
 
+    // Action: Pull model via Ollama HTTP REST API (POST /api/pull)
+    if (proxyAction === 'ollama-pull') {
+      const rootBase = cleanedBase
+        .replace(/\/v1\/systemone$/i, '')
+        .replace(/\/v1$/i, '')
+        .replace(/\/+$/, '');
+      const pullUrl = `${rootBase}/api/pull`;
+      const parsedPull = new URL(pullUrl);
+      if (
+        parsedPull.hostname === 'localhost' ||
+        parsedPull.hostname === '127.0.0.1'
+      ) {
+        return Response.json(
+          {
+            error:
+              'Cloudflare Edge Proxy cannot reach localhost. Please use Direct Mode or let the browser call http://localhost:11434/api/pull directly.',
+          },
+          {
+            status: 400,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          }
+        );
+      }
+
+      const bodyText = await request.text();
+      const forwardHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (authHeader && authHeader.trim().length > 0) {
+        forwardHeaders['Authorization'] = authHeader;
+      }
+
+      const upstreamRes = await fetch(pullUrl, {
+        method: 'POST',
+        headers: forwardHeaders,
+        body: bodyText || JSON.stringify({ model: 'clef', stream: true }),
+      });
+
+      return new Response(upstreamRes.body, {
+        status: upstreamRes.status,
+        statusText: upstreamRes.statusText,
+        headers: {
+          'Content-Type':
+            upstreamRes.headers.get('Content-Type') || 'application/x-ndjson',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
     const targetEndpoint =
       cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
         ? cleanedBase

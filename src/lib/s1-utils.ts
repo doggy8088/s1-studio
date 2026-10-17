@@ -134,12 +134,86 @@ export function formatEndpointPreviewUrl(
   return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
 }
 
+export const LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL = 'clef (尚未下載)';
+
+const MODELS_CACHE_STORAGE_KEY = 's1_studio_models_cache_v1';
+const memoryModelsCache = new Map<string, string[]>();
+
+/**
+ * Check whether an EndpointProfile targets Local Ollama (which must NOT be cached)
+ */
+export function isLocalOllamaProfile(
+  profile: Pick<EndpointProfile, 'id' | 'baseUrl'>
+): boolean {
+  const url = (profile.baseUrl || '').trim().toLowerCase();
+  return (
+    profile.id === 'local-ollama-clef' ||
+    url.includes('localhost:11434') ||
+    url.includes('127.0.0.1:11434') ||
+    url === 'http://localhost' ||
+    url === 'http://127.0.0.1'
+  );
+}
+
+function getProfileModelsCacheKey(profile: EndpointProfile): string {
+  const url = (profile.baseUrl || '').trim().replace(/\/+$/, '');
+  const keyPrefix = (profile.apiKey || '').trim().slice(0, 12);
+  return `${profile.id}::${url}::${keyPrefix}`;
+}
+
+export function getCachedModelsForProfile(
+  profile: EndpointProfile
+): string[] | undefined {
+  if (isLocalOllamaProfile(profile)) return undefined;
+  const cacheKey = getProfileModelsCacheKey(profile);
+  if (memoryModelsCache.has(cacheKey)) {
+    return memoryModelsCache.get(cacheKey);
+  }
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.localStorage.getItem(MODELS_CACHE_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Record<string, string[]>;
+    const list = parsed?.[cacheKey];
+    if (Array.isArray(list) && list.length > 0) {
+      memoryModelsCache.set(cacheKey, list);
+      return list;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return undefined;
+}
+
+export function setCachedModelsForProfile(
+  profile: EndpointProfile,
+  models: string[]
+): void {
+  if (isLocalOllamaProfile(profile) || models.length === 0) return;
+  const cacheKey = getProfileModelsCacheKey(profile);
+  memoryModelsCache.set(cacheKey, models);
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(MODELS_CACHE_STORAGE_KEY);
+    const parsed: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+    parsed[cacheKey] = models;
+    window.localStorage.setItem(
+      MODELS_CACHE_STORAGE_KEY,
+      JSON.stringify(parsed)
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
 /**
  * Determine whether a profile's Endpoint (or Cloudflare Account ID) and API Key are valid
  * so that Model selection can be rendered as a fixed-options dropdown (<select>).
+ * Note: For Local Ollama, a dropdown is ONLY shown when `/models` actually returns at least 1 model.
  */
 export function isProfileEndpointAndKeyValid(
-  profile: EndpointProfile
+  profile: EndpointProfile,
+  discoveredModels?: string[]
 ): boolean {
   if (
     profile.id === 's1-builtin-simulator' ||
@@ -151,6 +225,9 @@ export function isProfileEndpointAndKeyValid(
     const acct = extractCloudflareAccountId(profile);
     const hasKey = Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
     return Boolean(acct && hasKey);
+  }
+  if (isLocalOllamaProfile(profile)) {
+    return Boolean(discoveredModels && discoveredModels.length > 0);
   }
   const url = profile.baseUrl.trim();
   if (!url) return false;
@@ -182,11 +259,8 @@ export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
   ) {
     return ['clef:27b', 'clef:cloud', 'clef'];
   }
-  if (
-    profile.id === 'local-ollama-clef' ||
-    profile.baseUrl.includes('11434')
-  ) {
-    return ['clef', 'clef:27b', 'clef:cloud'];
+  if (isLocalOllamaProfile(profile)) {
+    return ['clef'];
   }
   if (
     profile.id === 'typesafe-ai-jev' ||
@@ -211,12 +285,21 @@ export function getSelectableModelsForProfile(
       '@cf/cloudflare/clef-flash',
     ];
   }
+  if (isLocalOllamaProfile(profile)) {
+    return discoveredModels && discoveredModels.length > 0
+      ? discoveredModels
+      : [];
+  }
   const baseList =
     discoveredModels && discoveredModels.length > 0
       ? discoveredModels
       : getDefaultModelsForProfile(profile);
   const current = profile.defaultModel.trim();
-  if (current && !baseList.includes(current)) {
+  if (
+    current &&
+    current !== LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL &&
+    !baseList.includes(current)
+  ) {
     return [current, ...baseList];
   }
   return baseList;
@@ -225,9 +308,11 @@ export function getSelectableModelsForProfile(
 /**
  * Query `/models` (and `/v1/models`, `/api/tags`) for a profile when its endpoint and API key are valid,
  * filtering for `clef` or `jev` related models.
+ * Caches API results for all profiles EXCEPT Local Ollama.
  */
 export async function fetchModelsForProfile(
-  profile: EndpointProfile
+  profile: EndpointProfile,
+  options?: { forceRefresh?: boolean }
 ): Promise<string[]> {
   if (isCloudflareProfile(profile)) {
     return [
@@ -240,6 +325,14 @@ export async function fetchModelsForProfile(
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   if (!baseUrlClean || baseUrlClean.startsWith('/api/')) {
     return getDefaultModelsForProfile(profile);
+  }
+
+  const isLocalOllama = isLocalOllamaProfile(profile);
+  if (!isLocalOllama && !options?.forceRefresh) {
+    const cached = getCachedModelsForProfile(profile);
+    if (cached && cached.length > 0) {
+      return cached;
+    }
   }
 
   const isLocalhost =
@@ -257,65 +350,185 @@ export async function fetchModelsForProfile(
     headers['Authorization'] = `Bearer ${profile.apiKey.trim()}`;
   }
 
-  if (profile.useProxy) {
-    headers['x-s1-target-url'] = baseUrlClean;
-    headers['x-s1-proxy-action'] = 'models';
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { models?: string[] };
-    return Array.isArray(data.models) ? data.models : [];
-  }
-
-  const rootBase = baseUrlClean.replace(/\/v1(\/systemone)?$/, '');
-  const candidateUrls = [
-    `${rootBase}/v1/models`,
-    `${rootBase}/models`,
-    `${rootBase}/api/tags`,
-  ];
   const discovered = new Set<string>();
 
-  for (const url of candidateUrls) {
+  if (profile.useProxy) {
     try {
-      const res = await fetch(url, { method: 'GET', headers });
-      if (!res.ok) continue;
-      const data = (await res.json()) as Record<string, unknown>;
-      const list = Array.isArray(data?.data)
-        ? data.data
-        : Array.isArray(data?.models)
-          ? data.models
-          : Array.isArray(data?.result)
-            ? data.result
-            : Array.isArray(data)
-              ? data
-              : [];
-
-      for (const item of list) {
-        const name =
-          typeof item === 'string'
-            ? item
-            : typeof item === 'object' && item !== null
-              ? String(
-                  (item as Record<string, unknown>).id ||
-                    (item as Record<string, unknown>).name ||
-                    (item as Record<string, unknown>).model ||
-                    ''
-                )
-              : '';
-        if (name && /(clef|jev)/i.test(name)) {
-          discovered.add(name);
+      const proxyHeaders: Record<string, string> = {
+        ...headers,
+        'x-s1-target-url': baseUrlClean,
+        'x-s1-proxy-action': 'models',
+      };
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: proxyHeaders,
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { models?: string[] };
+        if (Array.isArray(data.models)) {
+          for (const m of data.models) {
+            if (m) discovered.add(m);
+          }
         }
       }
-      if (discovered.size > 0) break;
     } catch {
-      // ignore and try next candidate
+      // fall through to direct fetch if proxy fails
     }
   }
 
-  return Array.from(discovered);
+  // If Direct Mode or if Local Ollama via Cloudflare Pages proxy returned empty, also try direct fetch
+  if (!profile.useProxy || (isLocalOllama && discovered.size === 0)) {
+    const rootBase = baseUrlClean.replace(/\/v1(\/systemone)?$/, '');
+    const candidateUrls = [
+      `${rootBase}/v1/models`,
+      `${rootBase}/models`,
+      `${rootBase}/api/tags`,
+    ];
+
+    for (const url of candidateUrls) {
+      try {
+        const res = await fetch(url, { method: 'GET', headers });
+        if (!res.ok) continue;
+        const data = (await res.json()) as Record<string, unknown>;
+        const list = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.models)
+            ? data.models
+            : Array.isArray(data?.result)
+              ? data.result
+              : Array.isArray(data)
+                ? data
+                : [];
+
+        for (const item of list) {
+          const name =
+            typeof item === 'string'
+              ? item
+              : typeof item === 'object' && item !== null
+                ? String(
+                    (item as Record<string, unknown>).id ||
+                      (item as Record<string, unknown>).name ||
+                      (item as Record<string, unknown>).model ||
+                      ''
+                  )
+                : '';
+          if (name && /(clef|jev)/i.test(name)) {
+            discovered.add(name);
+          }
+        }
+        if (discovered.size > 0) break;
+      } catch {
+        // ignore and try next candidate
+      }
+    }
+  }
+
+  const finalModels = Array.from(discovered);
+  if (!isLocalOllama && finalModels.length > 0) {
+    setCachedModelsForProfile(profile, finalModels);
+  }
+  return finalModels;
+}
+
+/**
+ * Pull `clef` model into Local Ollama directly via HTTP REST API (`POST /api/pull`)
+ */
+export async function pullLocalOllamaModel(
+  profile: EndpointProfile,
+  modelName = 'clef',
+  onProgress?: (statusText: string, percent?: number) => void
+): Promise<void> {
+  const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
+  const rootBase = baseUrlClean
+    .replace(/\/v1\/systemone$/i, '')
+    .replace(/\/v1$/i, '')
+    .replace(/\/+$/, '');
+
+  const payloadBody = JSON.stringify({ model: modelName, stream: true });
+  let res: Response | null = null;
+
+  if (profile.useProxy) {
+    try {
+      const proxyRes = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-s1-target-url': rootBase,
+          'x-s1-proxy-action': 'ollama-pull',
+        },
+        body: payloadBody,
+      });
+      if (proxyRes.ok) {
+        res = proxyRes;
+      }
+    } catch {
+      // fall back to direct fetch
+    }
+  }
+
+  if (!res) {
+    res = await fetch(`${rootBase}/api/pull`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: payloadBody,
+    });
+  }
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(
+      errText || `HTTP ${res.status}: 無法呼叫 ${rootBase}/api/pull`
+    );
+  }
+
+  if (!res.body) {
+    onProgress?.('已完成拉取', 100);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as {
+          status?: string;
+          completed?: number;
+          total?: number;
+          error?: string;
+        };
+        if (parsed.error) {
+          throw new Error(parsed.error);
+        }
+        if (parsed.status) {
+          const pct =
+            typeof parsed.completed === 'number' &&
+            typeof parsed.total === 'number' &&
+            parsed.total > 0
+              ? Math.round((parsed.completed / parsed.total) * 100)
+              : undefined;
+          onProgress?.(parsed.status, pct);
+        }
+      } catch (e) {
+        if (e instanceof Error && !e.message.includes('JSON')) {
+          throw e;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -706,7 +919,9 @@ export async function executeSystemOneRequest(
     overrideModel ??
     payload.model ??
     profile.defaultModel
-  ).trim();
+  )
+    .trim()
+    .replace(/\s*\(尚未下載\)\s*$/, '');
   const modelToUse = isCf
     ? normalizeCloudflareModelId(rawModelToUse)
     : rawModelToUse;
