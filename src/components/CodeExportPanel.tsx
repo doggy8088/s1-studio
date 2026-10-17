@@ -96,7 +96,7 @@ export function CodeExportPanel({
             }`}
           >
             <Code className="h-4 w-4 text-amber-400" />
-            Native fetch
+            fetch
           </button>
         </div>
 

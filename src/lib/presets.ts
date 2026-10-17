@@ -36,7 +36,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
   },
   {
     id: 's1-builtin-simulator',
-    name: 'Built-in Sandbox Simulator (Demo)',
+    name: '內建沙盒模擬器(Demo)',
     baseUrl: '/api/mock-systemone',
     apiKey: '',
     defaultModel: 'clef-simulator-1.0',

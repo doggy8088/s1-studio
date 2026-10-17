@@ -164,9 +164,9 @@ export function ResultCards({
               {primaryRun.error}
             </p>
             <p className="mt-2 text-sm leading-relaxed text-zinc-300">
-              若您尚未在本機啟動 Ollama (`ollama serve`) 或尚未設定遠端 API Key，可一鍵切換至內建的
+              若您尚未在本機啟動 Ollama (`ollama serve`) 或尚未設定遠端 API Key，可一鍵切換至
               <strong className="mx-1 text-amber-300">
-                Built-in Sandbox Simulator
+                內建沙盒模擬器(Demo)
               </strong>
               立即體驗完整的 Noul、Choice 與 Score 結構化決策診斷。
             </p>
@@ -179,7 +179,7 @@ export function ResultCards({
                   className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-zinc-950 shadow-md transition hover:bg-amber-400"
                 >
                   <Sparkles className="h-4 w-4" />
-                  <span>切換至內建 Sandbox Simulator 並立即執行</span>
+                  <span>切換至內建沙盒模擬器(Demo) 並立即執行</span>
                 </button>
               )}
               {onOpenProfileSettings && (

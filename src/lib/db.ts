@@ -42,24 +42,43 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
       return DEFAULT_PROFILES;
     }
 
+    let changed = false;
+    const normalized = parsed.map((p) => {
+      if (
+        p.id === 's1-builtin-simulator' &&
+        p.name === 'Built-in Sandbox Simulator (Demo)'
+      ) {
+        changed = true;
+        return { ...p, name: '內建沙盒模擬器(Demo)' };
+      }
+      return p;
+    });
+
     // Merge any newly added built-in DEFAULT_PROFILES (e.g. cloudflare-workers-ai-clef)
-    const existingIds = new Set(parsed.map((p) => p.id));
+    const existingIds = new Set(normalized.map((p) => p.id));
     const missingDefaults = DEFAULT_PROFILES.filter(
       (dp) => !existingIds.has(dp.id)
     );
     if (missingDefaults.length > 0) {
-      const simIdx = parsed.findIndex((p) => p.id === 's1-builtin-simulator');
-      const merged = [...parsed];
+      changed = true;
+      const simIdx = normalized.findIndex(
+        (p) => p.id === 's1-builtin-simulator'
+      );
       if (simIdx >= 0) {
-        merged.splice(simIdx, 0, ...missingDefaults);
+        normalized.splice(simIdx, 0, ...missingDefaults);
       } else {
-        merged.push(...missingDefaults);
+        normalized.push(...missingDefaults);
       }
-      window.localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
-      return merged;
     }
 
-    return parsed;
+    if (changed) {
+      window.localStorage.setItem(
+        PROFILES_STORAGE_KEY,
+        JSON.stringify(normalized)
+      );
+    }
+
+    return normalized;
   } catch {
     return DEFAULT_PROFILES;
   }

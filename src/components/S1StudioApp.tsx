@@ -427,12 +427,12 @@ export function S1StudioApp() {
               {isRunning ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Evaluating...</span>
+                  <span>評估中...</span>
                 </>
               ) : (
                 <>
                   <Play className="h-4 w-4 fill-current" />
-                  <span>Evaluate (⌘+↵)</span>
+                  <span>執行評估 (⌘+↵)</span>
                 </>
               )}
             </button>
@@ -880,7 +880,7 @@ export function S1StudioApp() {
                               return primaryRun.rawResponseText;
                             }
                           })()
-                        : '// 尚未執行請求，點擊右上角 Evaluate (⌘+↵) 後顯示回應內容'
+                        : '// 尚未執行請求，點擊右上角「執行評估 (⌘+↵)」後顯示回應內容'
                     }
                     readOnly
                     minHeight="200px"
