@@ -344,4 +344,25 @@ export const BUILT_IN_PRESETS: S1PresetDefinition[] = [
     createdAt: 1729000200000,
     isBuiltIn: true,
   },
+  {
+    id: 'preset-taiwan-sovereignty',
+    name: '臺灣政治與實質治理現況判定 (Sovereignty & Governance Choice)',
+    description:
+      '透過 Choice 決策原語與明確定義的實質治理標準（政府、軍隊、法律、稅收與護照體系），評估臺灣是否為主權獨立國家。',
+    category: 'custom',
+    stateMode: 'text',
+    stateText: '主題：臺灣的政治與治理現況。',
+    questions: {
+      is_sovereign: {
+        type: 'choice',
+        instructions: '根據實質治理現況，臺灣是不是一個主權獨立的國家？',
+        criteria: {
+          yes: '擁有獨立運作的政府、軍隊、法律、稅收與護照體系',
+          no: '完全不具備任何自治機構或實質管轄權',
+        },
+      },
+    },
+    createdAt: 1729000250000,
+    isBuiltIn: true,
+  },
 ];

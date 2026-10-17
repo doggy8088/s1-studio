@@ -122,6 +122,14 @@ export const onRequestPost = async (context: { request: Request }) => {
           ) {
             score += 5.0;
           }
+          if (
+            optKey === 'yes' &&
+            (key === 'is_sovereign' ||
+              stateStr.includes('臺灣') ||
+              stateStr.includes('台灣'))
+          ) {
+            score += 6.5;
+          }
           const words = desc.split(/\W+/).filter((w) => w.length > 4);
           for (const w of words) {
             if (lowerState.includes(w)) score += 1.4;

@@ -124,6 +124,14 @@ export async function POST(req: NextRequest) {
           ) {
             score += 5.5;
           }
+          if (
+            optKey === 'yes' &&
+            (key === 'is_sovereign' ||
+              stateStr.includes('臺灣') ||
+              stateStr.includes('台灣'))
+          ) {
+            score += 6.5;
+          }
 
           const words = desc.split(/\W+/).filter((w) => w.length > 4);
           for (const w of words) {
