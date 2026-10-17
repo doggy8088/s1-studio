@@ -19,10 +19,10 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
   },
   {
     id: 'typesafe-ai-jev',
-    name: 'TypeSafe AI (jev-1.13.0)',
+    name: 'TypeSafe AI (jev-latest)',
     baseUrl: 'https://api.typesafe.ai',
     apiKey: '',
-    defaultModel: 'jev-1.13.0',
+    defaultModel: 'jev-latest',
     useProxy: true,
   },
   {
@@ -69,7 +69,7 @@ export const BASE_URL_TEMPLATES = [
   {
     label: 'TypeSafe AI',
     url: 'https://api.typesafe.ai',
-    defaultModel: 'jev-1.13.0',
+    defaultModel: 'jev-latest',
   },
   {
     label: 'Cloudflare Workers AI',

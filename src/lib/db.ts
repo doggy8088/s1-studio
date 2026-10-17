@@ -53,6 +53,21 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
         updated = { ...updated, name: '內建沙盒模擬器(Demo)' };
       }
 
+      if (updated.id === 'typesafe-ai-jev') {
+        const nextName =
+          updated.name === 'TypeSafe AI (jev-1.13.0)'
+            ? 'TypeSafe AI (jev-latest)'
+            : updated.name;
+        const nextModel =
+          updated.defaultModel === 'jev-1.13.0' || !updated.defaultModel
+            ? 'jev-latest'
+            : updated.defaultModel;
+        if (nextName !== updated.name || nextModel !== updated.defaultModel) {
+          changed = true;
+          updated = { ...updated, name: nextName, defaultModel: nextModel };
+        }
+      }
+
       if (
         updated.id === 'cloudflare-workers-ai-clef' ||
         (updated.baseUrl || '').includes('api.cloudflare.com/client/v4/accounts/')

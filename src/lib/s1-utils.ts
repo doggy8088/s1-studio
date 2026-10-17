@@ -155,9 +155,9 @@ export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
     return ['clef', 'clef:cloud'];
   }
   if (profile.id === 'typesafe-ai-jev' || profile.baseUrl.includes('typesafe.ai')) {
-    return ['jev-1.13.0'];
+    return ['jev-latest'];
   }
-  return ['clef', 'clef:cloud', 'jev-1.13.0'];
+  return ['clef', 'clef:cloud', 'jev-latest'];
 }
 
 /**

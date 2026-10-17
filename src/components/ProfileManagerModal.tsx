@@ -461,7 +461,7 @@ export function ProfileManagerModal({
                 placeholder={
                   isCf
                     ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
-                    : 'clef:cloud / clef / jev-1.13.0'
+                    : 'clef:cloud / clef / jev-latest'
                 }
                 className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
               />
