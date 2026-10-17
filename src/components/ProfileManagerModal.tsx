@@ -12,6 +12,7 @@ import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
   LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
+  copyTextToClipboard,
   diagnoseLocalOllama,
   extractCloudflareAccountId,
   fetchModelsForProfile,
@@ -83,14 +84,12 @@ export function ProfileManagerModal({
   const [copiedCmdKey, setCopiedCmdKey] = useState<string | null>(null);
 
   const handleCopyCommand = async (key: string, cmd: string) => {
-    try {
-      await navigator.clipboard.writeText(cmd);
+    const ok = await copyTextToClipboard(cmd);
+    if (ok) {
       setCopiedCmdKey(key);
       setTimeout(() => {
         setCopiedCmdKey((curr) => (curr === key ? null : curr));
       }, 2000);
-    } catch {
-      // ignore clipboard errors
     }
   };
 

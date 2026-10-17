@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html[data-theme="dark"] {
   --background: #0b0c0e;
   --surface-1: #12141a;
   --surface-2: #181b22;
@@ -12,6 +13,20 @@
   --accent-emerald: #10b981;
   --accent-sky: #38bdf8;
   color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --background: #f8fafc;
+  --surface-1: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-well: #f8fafc;
+  --border-subtle: #cbd5e1;
+  --border-strong: #94a3b8;
+  --foreground: #0f172a;
+  --accent-amber: #d97706;
+  --accent-emerald: #059669;
+  --accent-sky: #0284c7;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -28,6 +43,28 @@ body {
   font-size: 15px;
   line-height: 1.6;
   accent-color: var(--accent-amber);
+  overflow-x: hidden;
+}
+
+/* Light theme surface adaptation without breaking dark-first utility classes */
+html[data-theme="light"] body {
+  filter: invert(0.93) hue-rotate(180deg);
+  background-color: #f8fafc;
+}
+
+html[data-theme="light"] img,
+html[data-theme="light"] svg.preserve-theme-color {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Accessible visible keyboard focus indicator */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-amber);
+  outline-offset: 2px;
 }
 
 /* Precision instrument technical grid background */
@@ -46,6 +83,17 @@ body {
 input:user-invalid,
 textarea:user-invalid {
   border-color: #f43f5e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Refined dark scrollbars */

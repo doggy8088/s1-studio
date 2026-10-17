@@ -18,6 +18,37 @@ export const MAX_TOTAL_IMAGES_BYTES = 8 * 1024 * 1024; // 8 MiB
 export const MAX_IMAGE_MEGAPIXELS = 16_000_000; // 16 MP
 
 /**
+ * Copy text to clipboard using modern Clipboard API with a fallback to a temporary textarea
+ * for non-HTTPS or restricted contexts.
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to execCommand fallback
+    }
+  }
+  if (typeof document === 'undefined') return false;
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Normalize Score probabilities whether returned as a number[] array `[0.45, 0.35, 0.20]`
  * or as an index-keyed object `{"0": 0.45, "1": 0.35, "2": 0.20}` from Ollama clef.
  */

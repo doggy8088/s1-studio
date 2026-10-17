@@ -21,6 +21,7 @@ import {
   LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
   builderItemsToQuestionsRecord,
+  copyTextToClipboard,
   diagnoseLocalOllama,
   executeSystemOneRequest,
   extractCloudflareAccountId,
@@ -70,11 +71,13 @@ import {
   Download,
   RefreshCw,
   AlertTriangle,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export function S1StudioApp() {
   // -------------------------------------------------------------------------
-  // 1. Endpoint Profiles & Compare Mode State (Hydration-safe)
+  // 1. Endpoint Profiles, Theme & Compare Mode State (Hydration-safe)
   // -------------------------------------------------------------------------
   const [profiles, setProfiles] = useState<EndpointProfile[]>(DEFAULT_PROFILES);
   const [activeProfileId, setActiveProfileId] = useState<string>(
@@ -84,8 +87,9 @@ export function S1StudioApp() {
   const [compareProfileId, setCompareProfileId] = useState<string>(
     DEFAULT_PROFILES[3]?.id || DEFAULT_PROFILES[1].id
   );
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>('dark');
 
-  // Hydrate saved profiles & activeProfileId on client mount to avoid SSR hydration mismatch
+  // Hydrate saved profiles, activeProfileId & theme on client mount to avoid SSR hydration mismatch
   useEffect(() => {
     queueMicrotask(() => {
       const loaded = loadProfilesFromLocalStorage();
@@ -96,6 +100,34 @@ export function S1StudioApp() {
       } else if (loaded[0]) {
         setActiveProfileId(loaded[0].id);
       }
+      try {
+        const currentAttr = document.documentElement.dataset.theme;
+        const storedTheme = localStorage.getItem('s1_studio_theme_v1');
+        if (currentAttr === 'light' || storedTheme === 'light') {
+          setThemeMode('light');
+          document.documentElement.dataset.theme = 'light';
+        } else {
+          setThemeMode('dark');
+          document.documentElement.dataset.theme = 'dark';
+        }
+      } catch {
+        // ignore storage restrictions
+      }
+    });
+  }, []);
+
+  const toggleThemeMode = useCallback(() => {
+    setThemeMode((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      if (typeof document !== 'undefined') {
+        document.documentElement.dataset.theme = next;
+      }
+      try {
+        localStorage.setItem('s1_studio_theme_v1', next);
+      } catch {
+        // ignore storage errors
+      }
+      return next;
     });
   }, []);
 
@@ -477,7 +509,7 @@ export function S1StudioApp() {
       includeRawApiKey: false,
       noulThresholds,
     });
-    await navigator.clipboard.writeText(curl);
+    await copyTextToClipboard(curl);
     setCopiedCurlQuick(true);
     setTimeout(() => setCopiedCurlQuick(false), 1800);
   };
@@ -498,6 +530,23 @@ export function S1StudioApp() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[#0b0c0e] text-zinc-100">
+      {/* Skip to Main Content Link for Keyboard Accessibility */}
+      <a
+        href="#main-workbench"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-amber-500 focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-zinc-950"
+      >
+        跳至主要工作區 (Skip to main workbench)
+      </a>
+
+      {/* Screen-reader live region for asynchronous evaluation status */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {isRunning
+          ? `正在發送請求至 ${activeProfile.name}...`
+          : primaryRun
+            ? `評估完成：${primaryRun.profileName} (${primaryRun.status} ${primaryRun.statusText}, ${primaryRun.latencyMs} ms)`
+            : ''}
+      </div>
+
       {/* ================================================================= */}
       {/* STICKY TIER 1: STUDIO BRAND BAR & PRIMARY ACTIONS                 */}
       {/* ================================================================= */}
@@ -515,9 +564,9 @@ export function S1StudioApp() {
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <span className="text-lg font-bold tracking-tight text-zinc-100">
+                <h1 className="text-lg font-bold tracking-tight text-zinc-100">
                   S1 Studio
-                </span>
+                </h1>
                 <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-xs font-semibold text-amber-300">
                   /v1/systemone
                 </span>
@@ -528,8 +577,34 @@ export function S1StudioApp() {
             </div>
           </div>
 
-          {/* Right Action Cluster: Presets, History, Copy cURL, Evaluate */}
+          {/* Right Action Cluster: Theme, Presets, History, Copy cURL, Evaluate */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={toggleThemeMode}
+              aria-label={
+                themeMode === 'dark'
+                  ? '切換至淺色主題 (Switch to Light Theme)'
+                  : '切換至深色主題 (Switch to Dark Theme)'
+              }
+              aria-pressed={themeMode === 'light'}
+              title={
+                themeMode === 'dark'
+                  ? '目前為深色主題，點擊切換為淺色主題'
+                  : '目前為淺色主題，點擊切換為深色主題'
+              }
+              className="flex items-center gap-1.5 rounded-xl border border-[#282d3a] bg-[#14171f] px-3 py-2 text-sm font-medium text-zinc-200 transition hover:border-[#383f52] hover:bg-[#1b1f2a]"
+            >
+              {themeMode === 'dark' ? (
+                <Sun className="h-4 w-4 text-amber-400" />
+              ) : (
+                <Moon className="h-4 w-4 text-sky-400" />
+              )}
+              <span className="hidden md:inline">
+                {themeMode === 'dark' ? '淺色' : '深色'}
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() =>
@@ -778,6 +853,7 @@ export function S1StudioApp() {
                   useProxy: !activeProfile.useProxy,
                 })
               }
+              aria-pressed={activeProfile.useProxy}
               title={
                 activeProfile.useProxy
                   ? 'Proxy Mode: 透過內建無狀態 Edge API 轉發請求以解決 CORS 阻擋'
@@ -801,6 +877,7 @@ export function S1StudioApp() {
             <button
               type="button"
               onClick={() => setIsCompareMode((v) => !v)}
+              aria-pressed={isCompareMode}
               className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition ${
                 isCompareMode
                   ? 'border-sky-500/50 bg-sky-500/20 text-sky-200'
@@ -910,7 +987,10 @@ export function S1StudioApp() {
       {/* ================================================================= */}
       {/* MAIN TWO-COLUMN DESKTOP WORKSPACE                                 */}
       {/* ================================================================= */}
-      <main className="bg-instrument-grid mx-auto grid w-full max-w-[1720px] flex-1 grid-cols-1 items-start gap-6 p-5 lg:grid-cols-12">
+      <main
+        id="main-workbench"
+        className="bg-instrument-grid mx-auto grid w-full max-w-[1720px] flex-1 grid-cols-1 items-start gap-6 p-5 lg:grid-cols-12"
+      >
         {/* --------------------------------------------------------------- */}
         {/* LEFT COLUMN: REQUEST BUILDER (State + Multimodal + Questions)   */}
         {/* --------------------------------------------------------------- */}
@@ -1202,41 +1282,88 @@ export function S1StudioApp() {
       </main>
 
       {/* ================================================================= */}
-      {/* FOOTER: VERSION INFO & COPYRIGHT                                  */}
+      {/* FOOTER: VERSION INFO, LICENSE, REFERENCES & COPYRIGHT             */}
       {/* ================================================================= */}
       <footer className="mt-auto border-t border-[#1e222b] bg-[#0b0c0e] py-4 text-sm text-zinc-400">
-        <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-3 px-5">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="font-bold text-zinc-100">S1 Studio</span>
-            <span className="telemetry-num rounded-md border border-[#2b303d] bg-[#14171f] px-2.5 py-0.5 font-mono text-xs font-medium text-amber-300">
-              v{process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0'}
-              {process.env.NEXT_PUBLIC_GIT_SHA
-                ? ` (${process.env.NEXT_PUBLIC_GIT_SHA})`
-                : ''}
-            </span>
-            <span className="hidden text-zinc-600 sm:inline">·</span>
-            <a
-              href="https://github.com/doggy8088/s1-studio"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden text-zinc-400 underline-offset-4 transition hover:text-amber-300 hover:underline sm:inline"
-            >
-              GitHub Repository
-            </a>
+        <div className="mx-auto flex max-w-[1720px] flex-col gap-2 px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="font-bold text-zinc-100">S1 Studio</span>
+              <span className="telemetry-num rounded-md border border-[#2b303d] bg-[#14171f] px-2.5 py-0.5 font-mono text-xs font-medium text-amber-300">
+                v{process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0'}
+                {process.env.NEXT_PUBLIC_GIT_SHA
+                  ? ` (${process.env.NEXT_PUBLIC_GIT_SHA})`
+                  : ''}
+              </span>
+              <span className="text-zinc-600">·</span>
+              <a
+                href="https://github.com/doggy8088/s1-studio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                GitHub Repository
+              </a>
+              <span className="text-zinc-600">·</span>
+              <a
+                href="https://github.com/doggy8088/s1-studio/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                MIT License
+              </a>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 text-zinc-400">
+              <span>Copyright © 2026</span>
+              <a
+                href="https://blog.miniasp.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-zinc-100 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                Will 保哥
+              </a>
+              <span className="text-zinc-600">·</span>
+              <span className="text-zinc-400">All rights reserved.</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-zinc-400">
-            <span>Copyright © 2026</span>
-            <a
-              href="https://blog.miniasp.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-zinc-100 underline-offset-4 transition hover:text-amber-300 hover:underline"
-            >
-              Will 保哥
-            </a>
-            <span className="text-zinc-600">·</span>
-            <span className="text-zinc-500">All rights reserved.</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span>參考規格與相容端點：</span>
+              <a
+                href="https://ollama.com/library/clef"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                Ollama clef
+              </a>
+              <span>·</span>
+              <a
+                href="https://developers.cloudflare.com/workers-ai/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                Cloudflare Workers AI
+              </a>
+              <span>·</span>
+              <a
+                href="https://www.typesafe.ai/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                TypeSafe AI
+              </a>
+            </div>
+            <span className="text-zinc-400">
+              All third-party trademarks (Ollama, Cloudflare, TypeSafe AI) belong
+              to their respective owners.
+            </span>
           </div>
         </div>
       </footer>
@@ -1275,7 +1402,7 @@ function CopyTextButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={async () => {
-        await navigator.clipboard.writeText(text);
+        await copyTextToClipboard(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}

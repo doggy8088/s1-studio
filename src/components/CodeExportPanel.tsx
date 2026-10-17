@@ -8,6 +8,7 @@ import {
   generateTypeScriptSnippet,
   getProfileApiKeyEnvVar,
 } from '@/lib/code-exporter';
+import { copyTextToClipboard } from '@/lib/s1-utils';
 import { Check, Copy, Terminal, Code, KeyRound } from 'lucide-react';
 
 interface CodeExportPanelProps {
@@ -41,7 +42,7 @@ export function CodeExportPanel({
   })();
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(snippet);
+    await copyTextToClipboard(snippet);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   };
