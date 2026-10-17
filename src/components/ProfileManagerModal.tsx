@@ -10,14 +10,17 @@ import {
 } from '@/lib/presets';
 import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
-  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL,
+  LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
+  diagnoseLocalOllama,
   extractCloudflareAccountId,
   fetchModelsForProfile,
   getCachedModelsForProfile,
   getDefaultModelsForProfile,
+  getLocalOllamaStatusModelDisplay,
   getSelectableModelsForProfile,
   isCloudflareProfile,
+  isLocalOllamaPlaceholderModel,
   isLocalOllamaProfile,
   isProfileEndpointAndKeyValid,
   normalizeCloudflareModelId,
@@ -37,6 +40,11 @@ import {
   RefreshCw,
   Download,
   Loader2,
+  AlertTriangle,
+  Copy,
+  Check,
+  ExternalLink,
+  Terminal,
 } from 'lucide-react';
 
 interface ProfileManagerModalProps {
@@ -65,10 +73,26 @@ export function ProfileManagerModal({
   const [discoveredModelsByProfile, setDiscoveredModelsByProfile] = useState<
     Record<string, string[]>
   >({});
+  const [localOllamaDiagByProfile, setLocalOllamaDiagByProfile] = useState<
+    Record<string, LocalOllamaDiagnosis>
+  >({});
   const [loadingModelsId, setLoadingModelsId] = useState<string | null>(null);
   const [pullingClef, setPullingClef] = useState(false);
   const [pullStatusText, setPullStatusText] = useState<string | null>(null);
   const [pullErrorText, setPullErrorText] = useState<string | null>(null);
+  const [copiedCmdKey, setCopiedCmdKey] = useState<string | null>(null);
+
+  const handleCopyCommand = async (key: string, cmd: string) => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmdKey(key);
+      setTimeout(() => {
+        setCopiedCmdKey((curr) => (curr === key ? null : curr));
+      }, 2000);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
 
   const currentSyncKey = `${isOpen}:${activeProfileId}`;
   if (currentSyncKey !== prevSyncKey) {
@@ -101,24 +125,27 @@ export function ProfileManagerModal({
   const loadModels = useCallback(
     async (profileToFetch: EndpointProfile, forceRefresh = false) => {
       setLoadingModelsId(profileToFetch.id);
+      setPullErrorText(null);
       try {
-        const models = await fetchModelsForProfile(profileToFetch, {
-          forceRefresh,
-        });
-        setDiscoveredModelsByProfile((prev) => ({
-          ...prev,
-          [profileToFetch.id]: models,
-        }));
-
         if (isLocalOllamaProfile(profileToFetch)) {
+          const diag = await diagnoseLocalOllama(profileToFetch);
+          setLocalOllamaDiagByProfile((prev) => ({
+            ...prev,
+            [profileToFetch.id]: diag,
+          }));
+          setDiscoveredModelsByProfile((prev) => ({
+            ...prev,
+            [profileToFetch.id]: diag.models,
+          }));
+
           const targetDefault =
-            models.length === 0
-              ? LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL
-              : profileToFetch.defaultModel ===
-                    LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL ||
-                  !models.includes(profileToFetch.defaultModel)
-                ? models[0]
+            diag.models.length === 0
+              ? getLocalOllamaStatusModelDisplay(diag.status)
+              : isLocalOllamaPlaceholderModel(profileToFetch.defaultModel) ||
+                  !diag.models.includes(profileToFetch.defaultModel)
+                ? diag.models[0]
                 : profileToFetch.defaultModel;
+
           if (targetDefault !== profileToFetch.defaultModel) {
             onSaveProfiles(
               profiles.map((p) =>
@@ -128,7 +155,16 @@ export function ProfileManagerModal({
               )
             );
           }
+          return;
         }
+
+        const models = await fetchModelsForProfile(profileToFetch, {
+          forceRefresh,
+        });
+        setDiscoveredModelsByProfile((prev) => ({
+          ...prev,
+          [profileToFetch.id]: models,
+        }));
       } finally {
         setLoadingModelsId((curr) =>
           curr === profileToFetch.id ? null : curr
@@ -171,15 +207,22 @@ export function ProfileManagerModal({
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : '無法連線至本機 Ollama';
-      const isRemoteOrigin =
-        typeof window !== 'undefined' &&
-        window.location.hostname !== 'localhost' &&
-        window.location.hostname !== '127.0.0.1';
-      setPullErrorText(
-        isRemoteOrigin
-          ? `拉取失敗：${msg}（從遠端網頁呼叫本機 Ollama 時，Ollama 預設會因 CORS 回傳 403 Forbidden；請設定 OLLAMA_ORIGINS="*" 後重啟 Ollama）`
-          : `拉取失敗：${msg}（請確認本機已啟動 ollama serve 且允許跨域連線 OLLAMA_ORIGINS="*"）`
-      );
+      const diag = await diagnoseLocalOllama(currentProfile);
+      setLocalOllamaDiagByProfile((prev) => ({
+        ...prev,
+        [currentProfile.id]: diag,
+      }));
+      if (diag.status === 'cors_blocked') {
+        setPullErrorText(
+          `拉取失敗：本機 Ollama 拒絕跨域請求 (HTTP 403 Forbidden)。請先點擊下方按鈕複製 OLLAMA_ORIGINS 設定指令並重啟 Ollama。`
+        );
+      } else if (diag.status === 'unreachable') {
+        setPullErrorText(
+          `拉取失敗：無法連線至 ${currentProfile.baseUrl}，請先確認本機已啟動 ollama serve。`
+        );
+      } else {
+        setPullErrorText(`拉取失敗：${msg}`);
+      }
       setPullStatusText(null);
     } finally {
       setPullingClef(false);
@@ -200,6 +243,7 @@ export function ProfileManagerModal({
   const currentDiscoveredModels =
     discoveredModelsByProfile[currentProfile.id] ??
     (!isLocalOllama ? getCachedModelsForProfile(currentProfile) : undefined);
+  const currentLocalOllamaDiag = localOllamaDiagByProfile[currentProfile.id];
 
   const isEndpointAndKeyValid = isProfileEndpointAndKeyValid(
     currentProfile,
@@ -602,35 +646,342 @@ export function ProfileManagerModal({
                   <input
                     type="text"
                     readOnly
-                    value={LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL}
+                    value={
+                      loadingModelsId === currentProfile.id
+                        ? '正在檢測本機 Ollama 連線與模型狀態...'
+                        : getLocalOllamaStatusModelDisplay(
+                            currentLocalOllamaDiag?.status
+                          )
+                    }
                     aria-label="Local Ollama model status"
-                    className="mt-1.5 w-full rounded-xl border border-amber-500/40 bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-amber-300 focus:outline-none"
+                    className={`mt-1.5 w-full rounded-xl border bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm focus:outline-none ${
+                      currentLocalOllamaDiag?.status === 'unreachable'
+                        ? 'border-rose-500/40 text-rose-300'
+                        : 'border-amber-500/40 text-amber-300'
+                    }`}
                   />
-                  <div className="mt-2.5 flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void handlePullLocalClef()}
-                      disabled={pullingClef}
-                      className="inline-flex w-fit items-center gap-1.5 text-xs font-semibold text-amber-400 underline decoration-amber-400/50 underline-offset-4 transition hover:text-amber-300 disabled:opacity-50"
-                    >
-                      {pullingClef ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )}
-                      <span>
-                        {pullingClef
-                          ? pullStatusText ||
-                            '正在透過 HTTP REST API 拉取 clef 模型...'
-                          : '點此透過 HTTP 呼叫 REST API (POST /api/pull) 直接拉取 clef 模型'}
-                      </span>
-                    </button>
-                    {pullErrorText && (
-                      <span className="text-xs text-rose-400">
-                        {pullErrorText}
-                      </span>
-                    )}
-                  </div>
+
+                  {/* Case 1: Unreachable (ollama serve is not running or port refused) */}
+                  {currentLocalOllamaDiag?.status === 'unreachable' && (
+                    <div className="mt-2.5 rounded-xl border border-rose-500/35 bg-rose-500/10 p-3.5 text-xs">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
+                        <div className="space-y-1.5">
+                          <div className="font-semibold text-rose-200">
+                            無法連線至本機 Ollama（{currentProfile.baseUrl}）
+                          </div>
+                          <p className="leading-relaxed text-rose-200/80">
+                            偵測不到本機 Ollama 服務回應（Connection Refused）。請確認本機已安裝並啟動{' '}
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-rose-100">
+                              ollama serve
+                            </code>{' '}
+                            或開啟 Ollama 應用程式。
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => void loadModels(currentProfile, true)}
+                              disabled={loadingModelsId === currentProfile.id}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-400/40 bg-rose-500/20 px-2.5 py-1.5 font-medium text-rose-100 transition hover:bg-rose-500/30 disabled:opacity-50"
+                            >
+                              <RefreshCw
+                                className={`h-3.5 w-3.5 ${
+                                  loadingModelsId === currentProfile.id
+                                    ? 'animate-spin'
+                                    : ''
+                                }`}
+                              />
+                              <span>重新檢測連線</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyCommand(
+                                  'serve-cli',
+                                  'OLLAMA_ORIGINS="*" ollama serve'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-mono text-zinc-200 transition hover:border-amber-500/50 hover:text-amber-200"
+                              title='複製 OLLAMA_ORIGINS="*" ollama serve 啟動指令'
+                            >
+                              {copiedCmdKey === 'serve-cli' ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300">
+                                    已複製啟動指令
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Terminal className="h-3.5 w-3.5 text-amber-400" />
+                                  <span>
+                                    複製指令: OLLAMA_ORIGINS=&quot;*&quot; ollama serve
+                                  </span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyCommand(
+                                  'mac-open-ollama',
+                                  'launchctl setenv OLLAMA_ORIGINS "*" && open -a Ollama'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-zinc-200 transition hover:border-amber-500/50 hover:text-amber-200"
+                              title="複製 macOS 啟動 Ollama.app 指令"
+                            >
+                              {copiedCmdKey === 'mac-open-ollama' ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300">
+                                    已複製 macOS 啟動指令
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                                  <span>複製 macOS 啟動 Ollama.app 指令</span>
+                                </>
+                              )}
+                            </button>
+
+                            <a
+                              href="https://ollama.com/download"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-zinc-300 transition hover:border-amber-500/50 hover:text-amber-200"
+                            >
+                              <span>下載 Ollama</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Case 2: Reachable, but CORS Blocked (HTTP 403 Forbidden due to OLLAMA_ORIGINS) */}
+                  {currentLocalOllamaDiag?.status === 'cors_blocked' && (
+                    <div className="mt-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                        <div className="space-y-1.5">
+                          <div className="font-semibold text-amber-200">
+                            本機 Ollama 已啟動，但被 CORS 跨域限制阻擋 (HTTP 403 Forbidden)
+                          </div>
+                          <p className="leading-relaxed text-amber-100/80">
+                            已偵測到本機{' '}
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-amber-200">
+                              {currentProfile.baseUrl}
+                            </code>{' '}
+                            正在運作，但 Ollama 預設僅允許{' '}
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-amber-200">
+                              localhost
+                            </code>{' '}
+                            來源。請設定{' '}
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-amber-200">
+                              OLLAMA_ORIGINS=&quot;*&quot;
+                            </code>{' '}
+                            並重新啟動本機 Ollama 即可解除阻擋。
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyCommand(
+                                  'mac-cors-restart',
+                                  'launchctl setenv OLLAMA_ORIGINS "*" && killall Ollama 2>/dev/null; pkill -x ollama 2>/dev/null; sleep 1 && open -a Ollama'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/20 px-2.5 py-1.5 font-semibold text-amber-100 transition hover:bg-amber-500/30"
+                              title="複製 macOS 設定 OLLAMA_ORIGINS 並自動重啟 Ollama.app 的終端機指令"
+                            >
+                              {copiedCmdKey === 'mac-cors-restart' ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300">
+                                    已複製！請貼至終端機執行
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Terminal className="h-3.5 w-3.5 text-amber-300" />
+                                  <span>
+                                    複製 macOS 設定 OLLAMA_ORIGINS 並重啟指令
+                                  </span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyCommand(
+                                  'cors-serve-cli',
+                                  'OLLAMA_ORIGINS="*" ollama serve'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-mono text-zinc-200 transition hover:border-amber-500/50 hover:text-amber-200"
+                            >
+                              {copiedCmdKey === 'cors-serve-cli' ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300">
+                                    已複製 CLI 指令
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                                  <span>
+                                    複製 CLI: OLLAMA_ORIGINS=&quot;*&quot; ollama serve
+                                  </span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void loadModels(currentProfile, true)}
+                              disabled={loadingModelsId === currentProfile.id}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-amber-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 disabled:opacity-50"
+                            >
+                              <RefreshCw
+                                className={`h-3.5 w-3.5 ${
+                                  loadingModelsId === currentProfile.id
+                                    ? 'animate-spin'
+                                    : ''
+                                }`}
+                              />
+                              <span>我已重啟 Ollama，重新檢測</span>
+                            </button>
+
+                            <a
+                              href="https://docs.ollama.com/faq#how-do-i-configure-ollama-server"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-zinc-300 transition hover:border-amber-500/50 hover:text-amber-200"
+                            >
+                              <span>官方 CORS 設定說明</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Case 3: Reachable & CORS OK, but `clef` model is not downloaded yet */}
+                  {(!currentLocalOllamaDiag ||
+                    currentLocalOllamaDiag.status === 'model_missing') && (
+                    <div className="mt-2.5 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3.5 text-xs">
+                      <div className="flex items-start gap-2.5">
+                        <Download className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                        <div className="space-y-2">
+                          <div className="font-semibold text-amber-200">
+                            {currentLocalOllamaDiag?.status === 'model_missing'
+                              ? `已成功連線至本機 Ollama${
+                                  currentLocalOllamaDiag.allModelsCount > 0
+                                    ? `（目前已安裝 ${currentLocalOllamaDiag.allModelsCount} 個其他模型）`
+                                    : ''
+                                }，但尚未下載 clef 模型`
+                              : '尚未在本機 Ollama 偵測到 clef 模型'}
+                          </div>
+                          <p className="leading-relaxed text-amber-100/80">
+                            您可以直接點擊下方按鈕透過 HTTP REST API（
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-amber-200">
+                              POST /api/pull
+                            </code>
+                            ）自動拉取{' '}
+                            <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-amber-200">
+                              clef
+                            </code>{' '}
+                            模型，或複製 CLI 指令至終端機下載。
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => void handlePullLocalClef()}
+                              disabled={pullingClef}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/20 px-3 py-1.5 font-semibold text-amber-100 transition hover:bg-amber-500/30 disabled:opacity-50"
+                            >
+                              {pullingClef ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Download className="h-3.5 w-3.5" />
+                              )}
+                              <span>
+                                {pullingClef
+                                  ? pullStatusText ||
+                                    '正在透過 HTTP REST API 拉取 clef 模型...'
+                                  : '透過 HTTP API (POST /api/pull) 直接拉取 clef 模型'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleCopyCommand(
+                                  'ollama-pull-clef',
+                                  'ollama pull clef'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-mono text-zinc-200 transition hover:border-amber-500/50 hover:text-amber-200"
+                            >
+                              {copiedCmdKey === 'ollama-pull-clef' ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300">
+                                    已複製指令
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                                  <span>複製 CLI: ollama pull clef</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void loadModels(currentProfile, true)}
+                              disabled={loadingModelsId === currentProfile.id}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-zinc-200 transition hover:border-amber-500/50 hover:text-amber-200 disabled:opacity-50"
+                            >
+                              <RefreshCw
+                                className={`h-3.5 w-3.5 ${
+                                  loadingModelsId === currentProfile.id
+                                    ? 'animate-spin'
+                                    : ''
+                                }`}
+                              />
+                              <span>重新檢測 /models</span>
+                            </button>
+
+                            <a
+                              href="https://ollama.com/library/clef"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#2c313f] bg-[#14171f] px-2.5 py-1.5 font-medium text-zinc-300 transition hover:border-amber-500/50 hover:text-amber-200"
+                            >
+                              <span>Ollama clef 模型頁</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {pullErrorText && (
+                    <div className="mt-2 text-xs font-medium text-rose-400">
+                      {pullErrorText}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

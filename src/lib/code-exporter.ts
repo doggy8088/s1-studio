@@ -5,6 +5,7 @@ import {
   formatEndpointPreviewUrl,
   getCloudflarePayloadModelSelector,
   isCloudflareProfile,
+  stripLocalOllamaStatusSuffix,
 } from './s1-utils';
 
 export interface CodeGenOptions {
@@ -82,9 +83,9 @@ function normalizePayloadForProfile(
   profile: EndpointProfile,
   payload: S1RequestPayload
 ): S1RequestPayload {
-  const rawModel = (payload.model || profile.defaultModel || '')
-    .trim()
-    .replace(/\s*\(尚未下載\)\s*$/, '');
+  const rawModel = stripLocalOllamaStatusSuffix(
+    payload.model || profile.defaultModel || ''
+  );
   if (!isCloudflareProfile(profile)) {
     return {
       ...payload,

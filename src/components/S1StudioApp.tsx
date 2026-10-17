@@ -18,17 +18,20 @@ import {
   saveProfilesToLocalStorage,
 } from '@/lib/db';
 import {
-  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL,
+  LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
   builderItemsToQuestionsRecord,
+  diagnoseLocalOllama,
   executeSystemOneRequest,
   extractCloudflareAccountId,
   fetchModelsForProfile,
   formatEndpointPreviewUrl,
   getCachedModelsForProfile,
   getDefaultModelsForProfile,
+  getLocalOllamaStatusModelDisplay,
   getSelectableModelsForProfile,
   isCloudflareProfile,
+  isLocalOllamaPlaceholderModel,
   isLocalOllamaProfile,
   isProfileEndpointAndKeyValid,
   pullLocalOllamaModel,
@@ -65,6 +68,8 @@ import {
   Server,
   KeyRound,
   Download,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 export function S1StudioApp() {
@@ -173,6 +178,10 @@ export function S1StudioApp() {
   const [discoveredModelsByProfile, setDiscoveredModelsByProfile] = useState<
     Record<string, string[]>
   >({});
+  const [localOllamaDiagByProfile, setLocalOllamaDiagByProfile] = useState<
+    Record<string, LocalOllamaDiagnosis>
+  >({});
+  const [recheckingLocalOllama, setRecheckingLocalOllama] = useState(false);
   const [pullingInlineClef, setPullingInlineClef] = useState(false);
   const [pullInlineStatus, setPullInlineStatus] = useState<string | null>(null);
 
@@ -190,9 +199,47 @@ export function S1StudioApp() {
     [discoveredModelsByProfile, activeProfile, isActiveLocalOllama]
   );
 
+  const activeLocalOllamaDiag = localOllamaDiagByProfile[activeProfile.id];
+
   const isActiveEndpointAndKeyValid = useMemo(
     () => isProfileEndpointAndKeyValid(activeProfile, activeDiscoveredModels),
     [activeProfile, activeDiscoveredModels]
+  );
+
+  const refreshActiveLocalOllama = useCallback(
+    async (targetProf: EndpointProfile) => {
+      setRecheckingLocalOllama(true);
+      try {
+        const diag = await diagnoseLocalOllama(targetProf);
+        setLocalOllamaDiagByProfile((prev) => ({
+          ...prev,
+          [targetProf.id]: diag,
+        }));
+        setDiscoveredModelsByProfile((prev) => ({
+          ...prev,
+          [targetProf.id]: diag.models,
+        }));
+        const nextDefault =
+          diag.models.length === 0
+            ? getLocalOllamaStatusModelDisplay(diag.status)
+            : isLocalOllamaPlaceholderModel(targetProf.defaultModel) ||
+                !diag.models.includes(targetProf.defaultModel)
+              ? diag.models[0]
+              : targetProf.defaultModel;
+        if (nextDefault !== targetProf.defaultModel) {
+          setProfiles((curr) => {
+            const updated = curr.map((p) =>
+              p.id === targetProf.id ? { ...p, defaultModel: nextDefault } : p
+            );
+            saveProfilesToLocalStorage(updated);
+            return updated;
+          });
+        }
+      } finally {
+        setRecheckingLocalOllama(false);
+      }
+    },
+    []
   );
 
   useEffect(() => {
@@ -219,39 +266,24 @@ export function S1StudioApp() {
 
     let cancelled = false;
     const timer = setTimeout(async () => {
+      if (isActiveLocalOllama) {
+        await refreshActiveLocalOllama(activeProfile);
+        return;
+      }
       const models = await fetchModelsForProfile(activeProfile, {
-        forceRefresh: isActiveLocalOllama,
+        forceRefresh: false,
       });
       if (cancelled) return;
       setDiscoveredModelsByProfile((prev) => ({
         ...prev,
         [activeProfile.id]: models,
       }));
-      if (isActiveLocalOllama) {
-        const nextDefault =
-          models.length === 0
-            ? LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL
-            : activeProfile.defaultModel ===
-                  LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL ||
-                !models.includes(activeProfile.defaultModel)
-              ? models[0]
-              : activeProfile.defaultModel;
-        if (nextDefault !== activeProfile.defaultModel) {
-          setProfiles((curr) => {
-            const updated = curr.map((p) =>
-              p.id === activeProfile.id ? { ...p, defaultModel: nextDefault } : p
-            );
-            saveProfilesToLocalStorage(updated);
-            return updated;
-          });
-        }
-      }
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [activeProfile, isActiveLocalOllama]);
+  }, [activeProfile, isActiveLocalOllama, refreshActiveLocalOllama]);
 
   const handleInlinePullClef = async () => {
     if (pullingInlineClef) return;
@@ -263,17 +295,10 @@ export function S1StudioApp() {
           pct !== undefined ? `${status} (${pct}%)` : status
         );
       });
-      const models = await fetchModelsForProfile(activeProfile, {
-        forceRefresh: true,
-      });
-      setDiscoveredModelsByProfile((prev) => ({
-        ...prev,
-        [activeProfile.id]: models,
-      }));
-      const nextModel = models[0] || 'clef';
-      updateActiveProfileInline({ defaultModel: nextModel });
+      await refreshActiveLocalOllama(activeProfile);
       setPullInlineStatus(null);
     } catch {
+      await refreshActiveLocalOllama(activeProfile);
       setIsProfileModalOpen(true);
     } finally {
       setPullingInlineClef(false);
@@ -624,31 +649,85 @@ export function S1StudioApp() {
                   ))}
                 </select>
               ) : isActiveLocalOllama ? (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <input
                     type="text"
                     readOnly
-                    value={LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL}
-                    title="本機 Ollama 尚未下載 clef 模型"
-                    className="w-40 rounded-lg border border-amber-500/40 bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:outline-none"
+                    value={
+                      recheckingLocalOllama
+                        ? '正在檢測本機 Ollama...'
+                        : getLocalOllamaStatusModelDisplay(
+                            activeLocalOllamaDiag?.status
+                          )
+                    }
+                    title={
+                      activeLocalOllamaDiag?.status === 'unreachable'
+                        ? `無法連線至本機 Ollama (${activeProfile.baseUrl})`
+                        : activeLocalOllamaDiag?.status === 'cors_blocked'
+                          ? '本機 Ollama 已啟動，但被 CORS 跨域限制阻擋 (HTTP 403)'
+                          : '本機 Ollama 尚未下載 clef 模型'
+                    }
+                    className={`w-52 rounded-lg border bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium focus:outline-none ${
+                      activeLocalOllamaDiag?.status === 'unreachable'
+                        ? 'border-rose-500/40 text-rose-300'
+                        : 'border-amber-500/40 text-amber-300'
+                    }`}
                   />
+
+                  {activeLocalOllamaDiag?.status === 'unreachable' ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileModalOpen(true)}
+                      title="查看本機 Ollama 啟動指令與連線診斷"
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/25"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                      <span>查看啟動說明</span>
+                    </button>
+                  ) : activeLocalOllamaDiag?.status === 'cors_blocked' ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileModalOpen(true)}
+                      title="查看並複製 OLLAMA_ORIGINS 跨域設定指令"
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/25"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                      <span>解除 CORS 阻擋</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleInlinePullClef()}
+                      disabled={pullingInlineClef}
+                      title="透過 HTTP 呼叫本機 Ollama REST API (POST /api/pull) 直接拉取 clef 模型"
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/25 disabled:opacity-50"
+                    >
+                      {pullingInlineClef ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      <span>
+                        {pullingInlineClef
+                          ? pullInlineStatus || '拉取中...'
+                          : '拉取 clef 模型'}
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => void handleInlinePullClef()}
-                    disabled={pullingInlineClef}
-                    title="透過 HTTP 呼叫本機 Ollama REST API (POST /api/pull) 直接拉取 clef 模型"
-                    className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/25 disabled:opacity-50"
+                    onClick={() => void refreshActiveLocalOllama(activeProfile)}
+                    disabled={recheckingLocalOllama}
+                    title="重新檢測本機 Ollama 連線與模型清單"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[#282d3a] bg-[#14171f] px-2 py-1 text-xs font-medium text-zinc-300 transition hover:border-amber-500/40 hover:text-amber-200 disabled:opacity-50"
                   >
-                    {pullingInlineClef ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )}
-                    <span>
-                      {pullingInlineClef
-                        ? pullInlineStatus || '拉取中...'
-                        : '拉取 clef 模型'}
-                    </span>
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${
+                        recheckingLocalOllama ? 'animate-spin' : ''
+                      }`}
+                    />
+                    <span className="hidden xl:inline">重新檢測</span>
                   </button>
                 </div>
               ) : (

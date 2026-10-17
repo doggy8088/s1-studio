@@ -135,6 +135,45 @@ export function formatEndpointPreviewUrl(
 }
 
 export const LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL = 'clef (尚未下載)';
+export const LOCAL_OLLAMA_CORS_BLOCKED_MODEL = 'clef (CORS 跨域阻擋)';
+export const LOCAL_OLLAMA_UNREACHABLE_MODEL = 'clef (本機 Ollama 未啟動)';
+
+export type LocalOllamaConnectionStatus =
+  | 'checking'
+  | 'ready'
+  | 'model_missing'
+  | 'cors_blocked'
+  | 'unreachable';
+
+export interface LocalOllamaDiagnosis {
+  status: LocalOllamaConnectionStatus;
+  models: string[];
+  allModelsCount: number;
+  errorDetail?: string;
+}
+
+export function stripLocalOllamaStatusSuffix(model?: string): string {
+  return (model || '')
+    .trim()
+    .replace(/\s*\((?:尚未下載|CORS[^)]*|本機 Ollama[^)]*)\)\s*$/, '');
+}
+
+export function isLocalOllamaPlaceholderModel(model?: string): boolean {
+  const m = (model || '').trim();
+  return (
+    m === LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL ||
+    m === LOCAL_OLLAMA_CORS_BLOCKED_MODEL ||
+    m === LOCAL_OLLAMA_UNREACHABLE_MODEL
+  );
+}
+
+export function getLocalOllamaStatusModelDisplay(
+  status?: LocalOllamaConnectionStatus
+): string {
+  if (status === 'cors_blocked') return LOCAL_OLLAMA_CORS_BLOCKED_MODEL;
+  if (status === 'unreachable') return LOCAL_OLLAMA_UNREACHABLE_MODEL;
+  return LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL;
+}
 
 const MODELS_CACHE_STORAGE_KEY = 's1_studio_models_cache_v1';
 const memoryModelsCache = new Map<string, string[]>();
@@ -297,12 +336,194 @@ export function getSelectableModelsForProfile(
   const current = profile.defaultModel.trim();
   if (
     current &&
-    current !== LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL &&
+    !isLocalOllamaPlaceholderModel(current) &&
     !baseList.includes(current)
   ) {
     return [current, ...baseList];
   }
   return baseList;
+}
+
+/**
+ * Diagnose Local Ollama connectivity and model state:
+ * - 'ready': Reachable, CORS allowed, and at least one `clef` / `jev` model is installed.
+ * - 'model_missing': Reachable and CORS allowed (HTTP 200), but no `clef` / `jev` model is installed yet.
+ * - 'cors_blocked': Local Ollama is running (verified via no-cors opaque probe or HTTP 403),
+ *                   but rejected browser CORS access because OLLAMA_ORIGINS does not include current origin.
+ * - 'unreachable': Connection refused / Local Ollama service is not running on target port.
+ */
+export async function diagnoseLocalOllama(
+  profile: EndpointProfile
+): Promise<LocalOllamaDiagnosis> {
+  const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
+  const rootBase = baseUrlClean
+    .replace(/\/v1\/systemone$/i, '')
+    .replace(/\/v1$/i, '')
+    .replace(/\/+$/, '');
+
+  if (!rootBase) {
+    return {
+      status: 'unreachable',
+      models: [],
+      allModelsCount: 0,
+      errorDetail: '未設定有效的 Local Ollama Base URL。',
+    };
+  }
+
+  const hasApiKey = Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
+  const headers: Record<string, string> = {};
+  if (hasApiKey) {
+    headers['Authorization'] = `Bearer ${profile.apiKey.trim()}`;
+  }
+
+  const discovered = new Set<string>();
+  const allNames = new Set<string>();
+  let reachableAndCorsOk = false;
+  let sawForbidden = false;
+
+  if (profile.useProxy) {
+    try {
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          ...headers,
+          Accept: 'application/json',
+          'x-s1-target-url': baseUrlClean,
+          'x-s1-proxy-action': 'models',
+        },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { models?: string[] };
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          for (const m of data.models) {
+            if (m) discovered.add(m);
+          }
+          return {
+            status: 'ready',
+            models: Array.from(discovered),
+            allModelsCount: discovered.size,
+          };
+        }
+      }
+    } catch {
+      // fall through to direct inspection
+    }
+  }
+
+  const candidateUrls = [`${rootBase}/api/tags`, `${rootBase}/v1/models`];
+
+  for (const url of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(url, {
+        method: 'GET',
+        ...(hasApiKey ? { headers } : {}),
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.status === 403) {
+        sawForbidden = true;
+        continue;
+      }
+      if (!res.ok) continue;
+
+      reachableAndCorsOk = true;
+      const data = (await res.json()) as Record<string, unknown>;
+      const list = Array.isArray(data?.models)
+        ? data.models
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.result)
+            ? data.result
+            : Array.isArray(data)
+              ? data
+              : [];
+
+      for (const item of list) {
+        const name =
+          typeof item === 'string'
+            ? item
+            : typeof item === 'object' && item !== null
+              ? String(
+                  (item as Record<string, unknown>).id ||
+                    (item as Record<string, unknown>).name ||
+                    (item as Record<string, unknown>).model ||
+                    ''
+                )
+              : '';
+        if (name) {
+          allNames.add(name);
+          if (/(clef|jev)/i.test(name)) {
+            discovered.add(name);
+          }
+        }
+      }
+      if (discovered.size > 0) break;
+    } catch {
+      // ignore and try next candidate
+    }
+  }
+
+  if (discovered.size > 0) {
+    return {
+      status: 'ready',
+      models: Array.from(discovered),
+      allModelsCount: Math.max(allNames.size, discovered.size),
+    };
+  }
+
+  if (reachableAndCorsOk) {
+    return {
+      status: 'model_missing',
+      models: [],
+      allModelsCount: allNames.size,
+    };
+  }
+
+  if (sawForbidden) {
+    return {
+      status: 'cors_blocked',
+      models: [],
+      allModelsCount: 0,
+      errorDetail:
+        '本機 Ollama 正在執行，但因未設定 OLLAMA_ORIGINS 而拒絕瀏覽器跨域請求 (HTTP 403 Forbidden)。',
+    };
+  }
+
+  // Probe with mode: 'no-cors' to distinguish "running but CORS blocked" from "not running (ECONNREFUSED)"
+  try {
+    const probeController = new AbortController();
+    const probeTimer = setTimeout(() => probeController.abort(), 2500);
+    const probeRes = await fetch(`${rootBase}/`, {
+      method: 'GET',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: probeController.signal,
+    });
+    clearTimeout(probeTimer);
+    if (probeRes.type === 'opaque' || probeRes.ok || probeRes.status > 0) {
+      return {
+        status: 'cors_blocked',
+        models: [],
+        allModelsCount: 0,
+        errorDetail:
+          '本機 Ollama 正在執行，但因未設定 OLLAMA_ORIGINS 而拒絕瀏覽器跨域請求 (HTTP 403 Forbidden)。',
+      };
+    }
+  } catch {
+    // no-cors probe also failed -> service not listening or blocked at network layer
+  }
+
+  return {
+    status: 'unreachable',
+    models: [],
+    allModelsCount: 0,
+    errorDetail: `無法連線至 ${rootBase}（Connection Refused），本機尚未啟動 ollama serve 或連接埠不正確。`,
+  };
 }
 
 /**
@@ -328,7 +549,12 @@ export async function fetchModelsForProfile(
   }
 
   const isLocalOllama = isLocalOllamaProfile(profile);
-  if (!isLocalOllama && !options?.forceRefresh) {
+  if (isLocalOllama) {
+    const diag = await diagnoseLocalOllama(profile);
+    return diag.models;
+  }
+
+  if (!options?.forceRefresh) {
     const cached = getCachedModelsForProfile(profile);
     if (cached && cached.length > 0) {
       return cached;
@@ -377,8 +603,7 @@ export async function fetchModelsForProfile(
     }
   }
 
-  // If Direct Mode or if Local Ollama via Cloudflare Pages proxy returned empty, also try direct fetch
-  if (!profile.useProxy || (isLocalOllama && discovered.size === 0)) {
+  if (!profile.useProxy) {
     const rootBase = baseUrlClean.replace(/\/v1(\/systemone)?$/, '');
     const candidateUrls = [
       `${rootBase}/v1/models`,
@@ -425,7 +650,7 @@ export async function fetchModelsForProfile(
   }
 
   const finalModels = Array.from(discovered);
-  if (!isLocalOllama && finalModels.length > 0) {
+  if (finalModels.length > 0) {
     setCachedModelsForProfile(profile, finalModels);
   }
   return finalModels;
@@ -915,13 +1140,9 @@ export async function executeSystemOneRequest(
   overrideModel?: string
 ): Promise<ExecutionRunMeta> {
   const isCf = isCloudflareProfile(profile);
-  const rawModelToUse = (
-    overrideModel ??
-    payload.model ??
-    profile.defaultModel
-  )
-    .trim()
-    .replace(/\s*\(尚未下載\)\s*$/, '');
+  const rawModelToUse = stripLocalOllamaStatusSuffix(
+    overrideModel ?? payload.model ?? profile.defaultModel
+  );
   const modelToUse = isCf
     ? normalizeCloudflareModelId(rawModelToUse)
     : rawModelToUse;
@@ -1052,6 +1273,33 @@ export async function executeSystemOneRequest(
     const latencyMs = Math.round(performance.now() - startTime);
     const msg =
       err instanceof Error ? err.message : 'Network or CORS error occurred';
+
+    if (isLocalOllamaProfile(profile)) {
+      const diag = await diagnoseLocalOllama(profile);
+      const localOllamaErr =
+        diag.status === 'cors_blocked'
+          ? `本機 Ollama 正在執行，但遭到 CORS 跨域限制阻擋 (HTTP 403 Forbidden)。請於終端機執行 launchctl setenv OLLAMA_ORIGINS "*" 並重啟 Ollama，或開啟「端點與金鑰設定」一鍵複製設定指令。`
+          : diag.status === 'model_missing'
+            ? `已連線至本機 Ollama，但尚未安裝 "${modelToUse || 'clef'}" 模型。請點選上方「拉取 clef 模型」或於「端點與金鑰設定」直接下載模型。`
+            : `無法連線至本機 Ollama (${baseUrlClean})。請確認本機已啟動 ollama serve（建議使用 OLLAMA_ORIGINS="*" ollama serve）。`;
+
+      return {
+        profileId: profile.id,
+        profileName: profile.name,
+        model: modelToUse || '(default)',
+        status: diag.status === 'cors_blocked' ? 403 : 0,
+        statusText:
+          diag.status === 'cors_blocked'
+            ? 'CORS Blocked (403)'
+            : diag.status === 'model_missing'
+              ? 'Model Missing'
+              : 'Connection Refused',
+        latencyMs,
+        error: localOllamaErr,
+        timestamp: Date.now(),
+      };
+    }
+
     return {
       profileId: profile.id,
       profileName: profile.name,
