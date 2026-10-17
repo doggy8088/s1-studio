@@ -3,7 +3,7 @@ import { EndpointProfile, S1PresetDefinition } from '@/types/systemone';
 export const DEFAULT_PROFILES: EndpointProfile[] = [
   {
     id: 'local-ollama-clef',
-    name: 'Local Ollama (clef)',
+    name: 'Local Ollama',
     baseUrl: 'http://localhost:11434',
     apiKey: '',
     defaultModel: 'clef',
@@ -11,7 +11,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
   },
   {
     id: 'ollama-cloud-clef',
-    name: 'Ollama Cloud (clef:cloud)',
+    name: 'Ollama Cloud',
     baseUrl: 'https://ollama.com',
     apiKey: '',
     defaultModel: 'clef:cloud',
@@ -19,7 +19,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
   },
   {
     id: 'typesafe-ai-jev',
-    name: 'TypeSafe AI (jev-latest)',
+    name: 'TypeSafe AI',
     baseUrl: 'https://api.typesafe.ai',
     apiKey: '',
     defaultModel: 'jev-latest',
@@ -27,7 +27,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
   },
   {
     id: 'cloudflare-workers-ai-clef',
-    name: 'Cloudflare Workers AI (clef)',
+    name: 'Cloudflare Workers AI',
     baseUrl:
       'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
     cloudflareAccountId: '',

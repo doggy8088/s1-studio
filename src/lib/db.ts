@@ -43,28 +43,30 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
     }
 
     let changed = false;
+    const legacyNameMap: Record<string, string> = {
+      'Local Ollama (clef)': 'Local Ollama',
+      'Ollama Cloud (clef:cloud)': 'Ollama Cloud',
+      'TypeSafe AI (jev-1.13.0)': 'TypeSafe AI',
+      'TypeSafe AI (jev-latest)': 'TypeSafe AI',
+      'Cloudflare Workers AI (clef)': 'Cloudflare Workers AI',
+      'Built-in Sandbox Simulator (Demo)': '內建沙盒模擬器(Demo)',
+    };
+
     const normalized = parsed.map((p) => {
       let updated = p;
-      if (
-        updated.id === 's1-builtin-simulator' &&
-        updated.name === 'Built-in Sandbox Simulator (Demo)'
-      ) {
+      if (legacyNameMap[updated.name]) {
         changed = true;
-        updated = { ...updated, name: '內建沙盒模擬器(Demo)' };
+        updated = { ...updated, name: legacyNameMap[updated.name] };
       }
 
       if (updated.id === 'typesafe-ai-jev') {
-        const nextName =
-          updated.name === 'TypeSafe AI (jev-1.13.0)'
-            ? 'TypeSafe AI (jev-latest)'
-            : updated.name;
         const nextModel =
           updated.defaultModel === 'jev-1.13.0' || !updated.defaultModel
             ? 'jev-latest'
             : updated.defaultModel;
-        if (nextName !== updated.name || nextModel !== updated.defaultModel) {
+        if (nextModel !== updated.defaultModel) {
           changed = true;
-          updated = { ...updated, name: nextName, defaultModel: nextModel };
+          updated = { ...updated, defaultModel: nextModel };
         }
       }
 

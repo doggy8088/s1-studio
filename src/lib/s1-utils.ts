@@ -135,6 +135,31 @@ export function formatEndpointPreviewUrl(
 }
 
 /**
+ * Determine whether a profile's Endpoint (or Cloudflare Account ID) and API Key are valid
+ * so that Model selection can be rendered as a fixed-options dropdown (<select>).
+ */
+export function isProfileEndpointAndKeyValid(
+  profile: EndpointProfile
+): boolean {
+  if (
+    profile.id === 's1-builtin-simulator' ||
+    profile.baseUrl.trim().startsWith('/api/')
+  ) {
+    return true;
+  }
+  if (isCloudflareProfile(profile)) {
+    const acct = extractCloudflareAccountId(profile);
+    const hasKey = Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
+    return Boolean(acct && hasKey);
+  }
+  const url = profile.baseUrl.trim();
+  if (!url) return false;
+  const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+  if (isLocalhost) return true;
+  return Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
+}
+
+/**
  * Get the built-in fallback models for a given profile before `/models` discovery
  */
 export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
@@ -145,19 +170,56 @@ export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
       '@cf/cloudflare/clef-flash',
     ];
   }
-  if (profile.id === 's1-builtin-simulator') {
-    return ['clef-simulator'];
+  if (
+    profile.id === 's1-builtin-simulator' ||
+    profile.baseUrl.trim().startsWith('/api/')
+  ) {
+    return ['clef-simulator-1.0'];
   }
-  if (profile.id === 'ollama-cloud-clef' || profile.baseUrl.includes('ollama.com')) {
+  if (
+    profile.id === 'ollama-cloud-clef' ||
+    profile.baseUrl.includes('ollama.com')
+  ) {
     return ['clef:cloud', 'clef'];
   }
-  if (profile.id === 'ollama-local-clef' || profile.baseUrl.includes('11434')) {
+  if (
+    profile.id === 'local-ollama-clef' ||
+    profile.baseUrl.includes('11434')
+  ) {
     return ['clef', 'clef:cloud'];
   }
-  if (profile.id === 'typesafe-ai-jev' || profile.baseUrl.includes('typesafe.ai')) {
+  if (
+    profile.id === 'typesafe-ai-jev' ||
+    profile.baseUrl.includes('typesafe.ai')
+  ) {
     return ['jev-latest'];
   }
   return ['clef', 'clef:cloud', 'jev-latest'];
+}
+
+/**
+ * Resolve the list of fixed selectable models for a profile (combining discovered `/models` or built-in defaults)
+ */
+export function getSelectableModelsForProfile(
+  profile: EndpointProfile,
+  discoveredModels?: string[]
+): string[] {
+  if (isCloudflareProfile(profile)) {
+    return [
+      '@cf/cloudflare/clef',
+      '@cf/cloudflare/clef-omni',
+      '@cf/cloudflare/clef-flash',
+    ];
+  }
+  const baseList =
+    discoveredModels && discoveredModels.length > 0
+      ? discoveredModels
+      : getDefaultModelsForProfile(profile);
+  const current = profile.defaultModel.trim();
+  if (current && !baseList.includes(current)) {
+    return [current, ...baseList];
+  }
+  return baseList;
 }
 
 /**

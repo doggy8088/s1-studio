@@ -22,9 +22,12 @@ import {
   builderItemsToQuestionsRecord,
   executeSystemOneRequest,
   extractCloudflareAccountId,
+  fetchModelsForProfile,
   formatEndpointPreviewUrl,
   getDefaultModelsForProfile,
+  getSelectableModelsForProfile,
   isCloudflareProfile,
+  isProfileEndpointAndKeyValid,
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
@@ -161,6 +164,48 @@ export function S1StudioApp() {
     });
     handleSaveProfiles(next);
   };
+
+  const [discoveredModelsByProfile, setDiscoveredModelsByProfile] = useState<
+    Record<string, string[]>
+  >({});
+
+  const isActiveEndpointAndKeyValid = useMemo(
+    () => isProfileEndpointAndKeyValid(activeProfile),
+    [activeProfile]
+  );
+
+  useEffect(() => {
+    if (!isActiveEndpointAndKeyValid) return;
+    if (
+      isCloudflareProfile(activeProfile) ||
+      activeProfile.baseUrl.trim().startsWith('/api/')
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const models = await fetchModelsForProfile(activeProfile);
+      if (!cancelled && models.length > 0) {
+        setDiscoveredModelsByProfile((prev) => ({
+          ...prev,
+          [activeProfile.id]: models,
+        }));
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isActiveEndpointAndKeyValid, activeProfile]);
+
+  const activeSelectableModels = useMemo(
+    () =>
+      getSelectableModelsForProfile(
+        activeProfile,
+        discoveredModelsByProfile[activeProfile.id]
+      ),
+    [activeProfile, discoveredModelsByProfile]
+  );
 
   // -------------------------------------------------------------------------
   // 4. Construct Payload & Validate State / Questions
@@ -480,28 +525,50 @@ export function S1StudioApp() {
 
               <div className="h-4 w-px bg-[#252934]" />
 
-              {/* Inline Model input with full width for @cf/cloudflare/clef-flash / clef-simulator / jev-1.13.0 */}
+              {/* Inline Model selector: dropdown (<select>) when Endpoint & API Key are valid, otherwise input */}
               <span className="text-xs font-semibold text-zinc-400">
                 Model:
               </span>
-              <input
-                type="text"
-                list="s1-models-datalist"
-                value={activeProfile.defaultModel}
-                onChange={(e) =>
-                  updateActiveProfileInline({ defaultModel: e.target.value })
-                }
-                placeholder="@cf/cloudflare/clef / clef:cloud"
-                title="當前模型名稱 (Model Name)"
-                className={`${
-                  isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'
-                } rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none`}
-              />
-              <datalist id="s1-models-datalist">
-                {getDefaultModelsForProfile(activeProfile).map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              {isActiveEndpointAndKeyValid ? (
+                <select
+                  value={activeProfile.defaultModel}
+                  onChange={(e) =>
+                    updateActiveProfileInline({ defaultModel: e.target.value })
+                  }
+                  aria-label="Select active model"
+                  title="當前模型名稱 (Model Name)"
+                  className="rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none"
+                >
+                  {activeSelectableModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    list="s1-models-datalist"
+                    value={activeProfile.defaultModel}
+                    onChange={(e) =>
+                      updateActiveProfileInline({
+                        defaultModel: e.target.value,
+                      })
+                    }
+                    placeholder="@cf/cloudflare/clef / clef:cloud"
+                    title="當前模型名稱 (Model Name)"
+                    className={`${
+                      isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'
+                    } rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none`}
+                  />
+                  <datalist id="s1-models-datalist">
+                    {getDefaultModelsForProfile(activeProfile).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </>
+              )}
 
               {/* Manage Profiles & API Key Modal Button */}
               <button
@@ -569,7 +636,7 @@ export function S1StudioApp() {
               >
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    vs: {p.name} ({p.defaultModel})
+                    vs: {p.name}
                   </option>
                 ))}
               </select>

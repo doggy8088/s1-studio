@@ -14,7 +14,9 @@ import {
   extractCloudflareAccountId,
   fetchModelsForProfile,
   getDefaultModelsForProfile,
+  getSelectableModelsForProfile,
   isCloudflareProfile,
+  isProfileEndpointAndKeyValid,
   normalizeCloudflareModelId,
 } from '@/lib/s1-utils';
 import {
@@ -127,11 +129,16 @@ export function ProfileManagerModal({
 
   if (!isOpen) return null;
 
+  const isEndpointAndKeyValid = isProfileEndpointAndKeyValid(currentProfile);
   const commonModelsList = isCf
     ? [...CLOUDFLARE_BUILT_IN_MODELS]
     : discoveredModelsByProfile[currentProfile.id]?.length
       ? discoveredModelsByProfile[currentProfile.id]
       : getDefaultModelsForProfile(currentProfile);
+  const selectableModels = getSelectableModelsForProfile(
+    currentProfile,
+    discoveredModelsByProfile[currentProfile.id]
+  );
 
   const handleUpdateCurrent = (patch: Partial<EndpointProfile>) => {
     const next = profiles.map((p) => {
@@ -452,36 +459,57 @@ export function ProfileManagerModal({
                   </button>
                 )}
               </div>
-              <input
-                type="text"
-                value={currentProfile.defaultModel}
-                onChange={(e) =>
-                  handleUpdateCurrent({ defaultModel: e.target.value })
-                }
-                placeholder={
-                  isCf
-                    ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
-                    : 'clef:cloud / clef / jev-latest'
-                }
-                className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
-              />
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-xs text-zinc-400">常用模型：</span>
-                {commonModelsList.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => handleUpdateCurrent({ defaultModel: m })}
-                    className={`rounded-md px-2.5 py-1 font-mono text-xs font-medium transition ${
-                      currentProfile.defaultModel === m
-                        ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
-                        : 'bg-[#181b22] text-zinc-300 hover:bg-[#222631]'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
+              {isEndpointAndKeyValid ? (
+                <select
+                  value={currentProfile.defaultModel}
+                  onChange={(e) =>
+                    handleUpdateCurrent({ defaultModel: e.target.value })
+                  }
+                  aria-label="Select default model"
+                  className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-amber-300 focus:border-amber-500 focus:outline-none"
+                >
+                  {selectableModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={currentProfile.defaultModel}
+                    onChange={(e) =>
+                      handleUpdateCurrent({ defaultModel: e.target.value })
+                    }
+                    placeholder={
+                      isCf
+                        ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
+                        : 'clef:cloud / clef / jev-latest'
+                    }
+                    className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
+                  />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-zinc-400">常用模型：</span>
+                    {commonModelsList.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() =>
+                          handleUpdateCurrent({ defaultModel: m })
+                        }
+                        className={`rounded-md px-2.5 py-1 font-mono text-xs font-medium transition ${
+                          currentProfile.defaultModel === m
+                            ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
+                            : 'bg-[#181b22] text-zinc-300 hover:bg-[#222631]'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="rounded-xl border border-[#262b38] bg-[#0d0e12] p-4">
