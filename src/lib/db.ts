@@ -59,6 +59,11 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
         updated = { ...updated, name: legacyNameMap[updated.name] };
       }
 
+      if (updated.id === 'local-ollama-clef' && updated.useProxy) {
+        changed = true;
+        updated = { ...updated, useProxy: false };
+      }
+
       if (updated.id === 'ollama-cloud-clef') {
         const nextModel =
           updated.defaultModel === 'clef:cloud' || !updated.defaultModel

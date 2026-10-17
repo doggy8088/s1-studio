@@ -7,7 +7,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     baseUrl: 'http://localhost:11434',
     apiKey: '',
     defaultModel: 'clef',
-    useProxy: true,
+    useProxy: false,
   },
   {
     id: 'ollama-cloud-clef',

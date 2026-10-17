@@ -171,8 +171,14 @@ export function ProfileManagerModal({
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : '無法連線至本機 Ollama';
+      const isRemoteOrigin =
+        typeof window !== 'undefined' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1';
       setPullErrorText(
-        `拉取失敗：${msg}（請確認本機已啟動 ollama serve）`
+        isRemoteOrigin
+          ? `拉取失敗：${msg}（從遠端網頁呼叫本機 Ollama 時，Ollama 預設會因 CORS 回傳 403 Forbidden；請設定 OLLAMA_ORIGINS="*" 後重啟 Ollama）`
+          : `拉取失敗：${msg}（請確認本機已啟動 ollama serve 且允許跨域連線 OLLAMA_ORIGINS="*"）`
       );
       setPullStatusText(null);
     } finally {
@@ -235,7 +241,7 @@ export function ProfileManagerModal({
       baseUrl: 'http://localhost:11434',
       apiKey: '',
       defaultModel: 'clef',
-      useProxy: true,
+      useProxy: false,
     };
     const next = [...profiles, newProfile];
     onSaveProfiles(next, newProfile.id);
@@ -499,6 +505,10 @@ export function ProfileManagerModal({
                           handleUpdateCurrent({
                             baseUrl: tpl.url,
                             defaultModel: tpl.defaultModel,
+                            useProxy:
+                              !tpl.url.includes('localhost') &&
+                              !tpl.url.includes('127.0.0.1') &&
+                              !tpl.url.startsWith('/api/'),
                           })
                         }
                         className="rounded-lg border border-[#2c313f] bg-[#181b22] px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-200"
