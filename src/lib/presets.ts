@@ -14,7 +14,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     name: 'Ollama Cloud',
     baseUrl: 'https://ollama.com',
     apiKey: '',
-    defaultModel: 'clef:cloud',
+    defaultModel: 'clef:27b',
     useProxy: true,
   },
   {
@@ -64,7 +64,7 @@ export const BASE_URL_TEMPLATES = [
   {
     label: 'Ollama Cloud',
     url: 'https://ollama.com',
-    defaultModel: 'clef:cloud',
+    defaultModel: 'clef:27b',
   },
   {
     label: 'TypeSafe AI',

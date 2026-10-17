@@ -182,8 +182,38 @@ export function ProfileManagerModal({
   };
 
   const handleResetDefaults = () => {
-    onSaveProfiles(DEFAULT_PROFILES, DEFAULT_PROFILES[0].id);
-    setSelectedId(DEFAULT_PROFILES[0].id);
+    const existingById = new Map(profiles.map((p) => [p.id, p]));
+    const restoredDefaults: EndpointProfile[] = DEFAULT_PROFILES.map((def) => {
+      const existing = existingById.get(def.id);
+      const preservedApiKey = existing?.apiKey ?? def.apiKey;
+      const preservedAcct = existing
+        ? extractCloudflareAccountId(existing)
+        : def.cloudflareAccountId ?? '';
+
+      if (isCloudflareProfile(def)) {
+        return {
+          ...def,
+          apiKey: preservedApiKey,
+          cloudflareAccountId: preservedAcct,
+          baseUrl: buildCloudflareEndpointUrl(preservedAcct, def.defaultModel),
+        };
+      }
+
+      return {
+        ...def,
+        apiKey: preservedApiKey,
+      };
+    });
+
+    const nextActiveId = restoredDefaults.some((p) => p.id === activeProfileId)
+      ? activeProfileId
+      : restoredDefaults[0].id;
+    const nextSelectedId = restoredDefaults.some((p) => p.id === selectedId)
+      ? selectedId
+      : restoredDefaults[0].id;
+
+    onSaveProfiles(restoredDefaults, nextActiveId);
+    setSelectedId(nextSelectedId);
   };
 
   return (
@@ -234,6 +264,7 @@ export function ProfileManagerModal({
               {profiles.map((p) => {
                 const isSelected = p.id === currentProfile.id;
                 const isActive = p.id === activeProfileId;
+                const isBuiltIn = BUILT_IN_PROFILE_IDS.has(p.id);
                 return (
                   <div
                     key={p.id}
@@ -245,12 +276,17 @@ export function ProfileManagerModal({
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-semibold">
                           {p.name}
                         </span>
+                        {isBuiltIn && (
+                          <span className="shrink-0 rounded-md border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-sky-300">
+                            內建
+                          </span>
+                        )}
                         {isActive && (
-                          <span className="rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+                          <span className="shrink-0 rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
                             使用中
                           </span>
                         )}
@@ -259,7 +295,7 @@ export function ProfileManagerModal({
                         {p.baseUrl} · {p.defaultModel || 'no-model'}
                       </div>
                     </div>
-                    {profiles.length > 1 && (
+                    {!isBuiltIn && profiles.length > 1 && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -267,7 +303,7 @@ export function ProfileManagerModal({
                           handleDelete(p.id);
                         }}
                         className="ml-2 rounded-lg p-1.5 text-zinc-500 opacity-0 transition hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"
-                        title="刪除此 Profile"
+                        title="刪除此自訂 Profile"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -290,6 +326,7 @@ export function ProfileManagerModal({
                 type="button"
                 onClick={handleResetDefaults}
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#232732] bg-[#12141a] px-3 py-2 text-xs font-medium text-zinc-400 transition hover:bg-[#1a1d26] hover:text-zinc-200"
+                title="重置預設端點範本設定（保留已填寫的 API Key 與 CLOUDFLARE_ACCOUNT_ID）"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 重置為預設端點範本
@@ -302,9 +339,16 @@ export function ProfileManagerModal({
             {/* 1. Profile Name */}
             <div>
               <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-zinc-200">
-                  Profile Name 設定檔名稱
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-semibold text-zinc-200">
+                    Profile Name 設定檔名稱
+                  </label>
+                  {isBuiltInProfile && (
+                    <span className="rounded-md border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-sky-300">
+                      內建範本
+                    </span>
+                  )}
+                </div>
                 <span className="font-mono text-xs text-amber-300/90">
                   cURL 變數：${getProfileApiKeyEnvVar(currentProfile)}
                 </span>
@@ -485,7 +529,7 @@ export function ProfileManagerModal({
                     placeholder={
                       isCf
                         ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
-                        : 'clef:cloud / clef / jev-latest'
+                        : 'clef:27b / clef / jev-latest'
                     }
                     className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                   />

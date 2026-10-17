@@ -556,7 +556,7 @@ export function S1StudioApp() {
                         defaultModel: e.target.value,
                       })
                     }
-                    placeholder="@cf/cloudflare/clef / clef:cloud"
+                    placeholder="@cf/cloudflare/clef / clef:27b"
                     title="當前模型名稱 (Model Name)"
                     className={`${
                       isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'

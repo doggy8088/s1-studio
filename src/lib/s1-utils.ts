@@ -180,13 +180,13 @@ export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
     profile.id === 'ollama-cloud-clef' ||
     profile.baseUrl.includes('ollama.com')
   ) {
-    return ['clef:cloud', 'clef'];
+    return ['clef:27b', 'clef:cloud', 'clef'];
   }
   if (
     profile.id === 'local-ollama-clef' ||
     profile.baseUrl.includes('11434')
   ) {
-    return ['clef', 'clef:cloud'];
+    return ['clef', 'clef:27b', 'clef:cloud'];
   }
   if (
     profile.id === 'typesafe-ai-jev' ||
@@ -194,7 +194,7 @@ export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
   ) {
     return ['jev-latest'];
   }
-  return ['clef', 'clef:cloud', 'jev-latest'];
+  return ['clef', 'clef:27b', 'clef:cloud', 'jev-latest'];
 }
 
 /**

@@ -59,6 +59,17 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
         updated = { ...updated, name: legacyNameMap[updated.name] };
       }
 
+      if (updated.id === 'ollama-cloud-clef') {
+        const nextModel =
+          updated.defaultModel === 'clef:cloud' || !updated.defaultModel
+            ? 'clef:27b'
+            : updated.defaultModel;
+        if (nextModel !== updated.defaultModel) {
+          changed = true;
+          updated = { ...updated, defaultModel: nextModel };
+        }
+      }
+
       if (updated.id === 'typesafe-ai-jev') {
         const nextModel =
           updated.defaultModel === 'jev-1.13.0' || !updated.defaultModel
