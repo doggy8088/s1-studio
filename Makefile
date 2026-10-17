@@ -1,4 +1,4 @@
-.PHONY: help install dev build cf-build cf-deploy start lint typecheck check clean
+.PHONY: help install dev build cf-build cf-deploy start lint typecheck check bump-patch clean
 
 PORT ?= 3000
 CF_PROJECT ?= s1-studio
@@ -33,6 +33,9 @@ typecheck: ## Run TypeScript compiler type check (noEmit)
 	bun x tsc --noEmit
 
 check: typecheck lint build ## Run full verification pipeline (typecheck + lint + build)
+
+bump-patch: ## Bump package.json patch version (required on every AI agent code edit)
+	node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));const v=p.version.split(".").map(Number);v[2]=(v[2]||0)+1;p.version=v.join(".");fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");console.log("Bumped version to",p.version);'
 
 clean: ## Remove Next.js build artifacts and caches
 	rm -rf .next out tsconfig.tsbuildinfo .cf-api-backup
