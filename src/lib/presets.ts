@@ -30,8 +30,9 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     name: 'Cloudflare Workers AI (clef)',
     baseUrl:
       'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
+    cloudflareAccountId: '',
     apiKey: '',
-    defaultModel: 'clef',
+    defaultModel: '@cf/cloudflare/clef',
     useProxy: true,
   },
   {
@@ -43,6 +44,16 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     useProxy: false,
   },
 ];
+
+export const BUILT_IN_PROFILE_IDS = new Set(
+  DEFAULT_PROFILES.map((p) => p.id)
+);
+
+export const CLOUDFLARE_BUILT_IN_MODELS = [
+  '@cf/cloudflare/clef',
+  '@cf/cloudflare/clef-omni',
+  '@cf/cloudflare/clef-flash',
+] as const;
 
 export const BASE_URL_TEMPLATES = [
   {
@@ -63,7 +74,7 @@ export const BASE_URL_TEMPLATES = [
   {
     label: 'Cloudflare Workers AI',
     url: 'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
-    defaultModel: 'clef',
+    defaultModel: '@cf/cloudflare/clef',
   },
   {
     label: '內建模擬器 (Demo)',

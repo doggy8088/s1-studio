@@ -1,8 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+function extractClefAndJevModels(payload: unknown): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const obj = payload as Record<string, unknown>;
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(obj.data)
+      ? obj.data
+      : Array.isArray(obj.models)
+        ? obj.models
+        : Array.isArray(obj.result)
+          ? obj.result
+          : [];
+
+  const matched: string[] = [];
+  for (const item of list) {
+    if (typeof item === 'string') {
+      if (/(clef|jev)/i.test(item)) matched.push(item.trim());
+    } else if (item && typeof item === 'object') {
+      const rec = item as Record<string, unknown>;
+      const rawId = String(rec.id ?? rec.name ?? rec.model ?? '').trim();
+      if (rawId && /(clef|jev)/i.test(rawId)) {
+        matched.push(rawId);
+      }
+    }
+  }
+  return Array.from(new Set(matched));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const targetBaseUrl = req.headers.get('x-s1-target-url');
+    const proxyAction = req.headers.get('x-s1-proxy-action');
     const authHeader = req.headers.get('authorization');
 
     if (!targetBaseUrl) {
@@ -12,8 +41,56 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ endpoint)
     const cleanedBase = targetBaseUrl.trim().replace(/\/+$/, '');
+
+    // Action: Discover /models (and filter clef / jev models)
+    if (proxyAction === 'models') {
+      const rootBase = cleanedBase
+        .replace(/\/v1\/systemone$/i, '')
+        .replace(/\/v1$/i, '')
+        .replace(/\/+$/, '');
+
+      const forwardHeaders: Record<string, string> = {
+        Accept: 'application/json',
+      };
+      if (authHeader && authHeader.trim().length > 0) {
+        forwardHeaders['Authorization'] = authHeader;
+      }
+
+      const candidateUrls = [
+        `${rootBase}/v1/models`,
+        `${rootBase}/models`,
+        `${rootBase}/api/tags`,
+      ];
+
+      const discovered = new Set<string>();
+      for (const urlStr of candidateUrls) {
+        try {
+          const parsed = new URL(urlStr);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            continue;
+          }
+          const res = await fetch(parsed.toString(), {
+            method: 'GET',
+            headers: forwardHeaders,
+          });
+          if (!res.ok) continue;
+          const json = await res.json();
+          for (const m of extractClefAndJevModels(json)) {
+            discovered.add(m);
+          }
+          if (discovered.size > 0) break;
+        } catch {
+          // Try next candidate
+        }
+      }
+
+      return NextResponse.json({
+        models: Array.from(discovered),
+      });
+    }
+
+    // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ endpoint)
     const targetEndpoint =
       cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
         ? cleanedBase

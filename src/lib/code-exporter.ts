@@ -1,4 +1,11 @@
 import { EndpointProfile, S1RequestPayload } from '@/types/systemone';
+import {
+  buildCloudflareEndpointUrl,
+  extractCloudflareAccountId,
+  formatEndpointPreviewUrl,
+  getCloudflarePayloadModelSelector,
+  isCloudflareProfile,
+} from './s1-utils';
 
 export interface CodeGenOptions {
   includeRawApiKey: boolean;
@@ -59,24 +66,30 @@ export function shouldIncludeAuthInSnippet(profile: EndpointProfile): boolean {
   return true;
 }
 
-export function getEndpointUrl(baseUrl: string, model?: string): string {
+export function getEndpointUrl(
+  baseUrl: string,
+  model?: string,
+  cloudflareAccountId?: string
+): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
   if (clean.startsWith('/')) {
     return `http://localhost:3000${clean}/v1/systemone`;
   }
-  if (clean.includes('/ai/run/')) {
-    if (
-      model?.trim() === 'clef-flash' &&
-      clean.endsWith('/@cf/cloudflare/clef')
-    ) {
-      return clean.replace(
-        /\/@cf\/cloudflare\/clef$/,
-        '/@cf/cloudflare/clef-flash'
-      );
-    }
-    return clean;
-  }
-  return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
+  return formatEndpointPreviewUrl(clean, model, cloudflareAccountId);
+}
+
+function normalizePayloadForProfile(
+  profile: EndpointProfile,
+  payload: S1RequestPayload
+): S1RequestPayload {
+  if (!isCloudflareProfile(profile)) return payload;
+  const modelToUse = payload.model || profile.defaultModel;
+  return {
+    ...payload,
+    ...(modelToUse
+      ? { model: getCloudflarePayloadModelSelector(modelToUse) }
+      : {}),
+  };
 }
 
 /**
@@ -87,8 +100,12 @@ export function generateCurlSnippet(
   payload: S1RequestPayload,
   options: CodeGenOptions
 ): string {
-  const endpoint = getEndpointUrl(profile.baseUrl, payload.model || profile.defaultModel);
-  const jsonPayload = JSON.stringify(payload, null, 2);
+  const modelToUse = payload.model || profile.defaultModel;
+  const endpoint = isCloudflareProfile(profile)
+    ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
+    : getEndpointUrl(profile.baseUrl, modelToUse, profile.cloudflareAccountId);
+  const normalizedPayload = normalizePayloadForProfile(profile, payload);
+  const jsonPayload = JSON.stringify(normalizedPayload, null, 2);
   const escapedBody = jsonPayload.replace(/'/g, `'\\''`);
 
   const envVarName = getProfileApiKeyEnvVar(profile);
@@ -210,12 +227,20 @@ runDecision().catch(console.error);
 `;
   }
 
-  const endpoint = getEndpointUrl(profile.baseUrl, payload.model || profile.defaultModel);
+  const modelToUse = payload.model || profile.defaultModel;
+  const endpoint = isCloudflareProfile(profile)
+    ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
+    : getEndpointUrl(profile.baseUrl, modelToUse, profile.cloudflareAccountId);
+  const fetchPayloadStr = JSON.stringify(
+    normalizePayloadForProfile(profile, payload),
+    null,
+    2
+  );
   return `const ENDPOINT = "${endpoint}";
 const API_KEY = ${apiKeyExpr};
 
 async function evaluateSystemOne() {
-  const payload = ${payloadStr};
+  const payload = ${fetchPayloadStr};
 
   const response = await fetch(ENDPOINT, {
     method: "POST",

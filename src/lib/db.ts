@@ -44,14 +44,61 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
 
     let changed = false;
     const normalized = parsed.map((p) => {
+      let updated = p;
       if (
-        p.id === 's1-builtin-simulator' &&
-        p.name === 'Built-in Sandbox Simulator (Demo)'
+        updated.id === 's1-builtin-simulator' &&
+        updated.name === 'Built-in Sandbox Simulator (Demo)'
       ) {
         changed = true;
-        return { ...p, name: '內建沙盒模擬器(Demo)' };
+        updated = { ...updated, name: '內建沙盒模擬器(Demo)' };
       }
-      return p;
+
+      if (
+        updated.id === 'cloudflare-workers-ai-clef' ||
+        (updated.baseUrl || '').includes('api.cloudflare.com/client/v4/accounts/')
+      ) {
+        const acctMatch = (updated.baseUrl || '').match(
+          /\/client\/v4\/accounts\/([^/]+)\/ai\/run/
+        );
+        const extractedAcct =
+          updated.cloudflareAccountId !== undefined
+            ? updated.cloudflareAccountId
+            : acctMatch &&
+                acctMatch[1] &&
+                acctMatch[1] !== '$CLOUDFLARE_ACCOUNT_ID'
+              ? acctMatch[1]
+              : '';
+
+        let cfModel = (updated.defaultModel || '').trim();
+        if (
+          cfModel === 'clef' ||
+          cfModel === 'clef-omni' ||
+          cfModel === 'clef-flash'
+        ) {
+          cfModel = `@cf/cloudflare/${cfModel}`;
+        } else if (!cfModel.startsWith('@cf/cloudflare/')) {
+          cfModel = '@cf/cloudflare/clef';
+        }
+
+        const acctForUrl = extractedAcct.trim() || '$CLOUDFLARE_ACCOUNT_ID';
+        const nextBaseUrl = `https://api.cloudflare.com/client/v4/accounts/${acctForUrl}/ai/run/${cfModel}`;
+
+        if (
+          updated.cloudflareAccountId !== extractedAcct ||
+          updated.defaultModel !== cfModel ||
+          updated.baseUrl !== nextBaseUrl
+        ) {
+          changed = true;
+          updated = {
+            ...updated,
+            cloudflareAccountId: extractedAcct,
+            defaultModel: cfModel,
+            baseUrl: nextBaseUrl,
+          };
+        }
+      }
+
+      return updated;
     });
 
     // Merge any newly added built-in DEFAULT_PROFILES (e.g. cloudflare-workers-ai-clef)

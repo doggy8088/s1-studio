@@ -1,9 +1,22 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { EndpointProfile } from '@/types/systemone';
-import { BASE_URL_TEMPLATES, DEFAULT_PROFILES } from '@/lib/presets';
+import {
+  BASE_URL_TEMPLATES,
+  BUILT_IN_PROFILE_IDS,
+  CLOUDFLARE_BUILT_IN_MODELS,
+  DEFAULT_PROFILES,
+} from '@/lib/presets';
 import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
+import {
+  buildCloudflareEndpointUrl,
+  extractCloudflareAccountId,
+  fetchModelsForProfile,
+  getDefaultModelsForProfile,
+  isCloudflareProfile,
+  normalizeCloudflareModelId,
+} from '@/lib/s1-utils';
 import {
   Plus,
   Trash2,
@@ -15,6 +28,7 @@ import {
   X,
   RotateCcw,
   Lock,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ProfileManagerModalProps {
@@ -40,12 +54,67 @@ export function ProfileManagerModal({
     `${isOpen}:${activeProfileId}`
   );
   const [showKey, setShowKey] = useState(false);
+  const [discoveredModelsByProfile, setDiscoveredModelsByProfile] = useState<
+    Record<string, string[]>
+  >({});
+  const [loadingModelsId, setLoadingModelsId] = useState<string | null>(null);
 
   const currentSyncKey = `${isOpen}:${activeProfileId}`;
   if (currentSyncKey !== prevSyncKey) {
     setPrevSyncKey(currentSyncKey);
     setSelectedId(activeProfileId);
   }
+
+  const currentProfile = useMemo(
+    () => profiles.find((p) => p.id === selectedId) || profiles[0],
+    [profiles, selectedId]
+  );
+
+  const isBuiltInProfile = BUILT_IN_PROFILE_IDS.has(currentProfile.id);
+  const isCf = isCloudflareProfile(currentProfile);
+  const cfAccountId = isCf ? extractCloudflareAccountId(currentProfile) : '';
+
+  const canFetchRemoteModels = useMemo(() => {
+    if (isCf) return false;
+    const url = currentProfile.baseUrl.trim();
+    if (!url || url.startsWith('/api/')) return false;
+    const isLocalhost =
+      url.includes('localhost') || url.includes('127.0.0.1');
+    const hasKey = Boolean(
+      currentProfile.apiKey && currentProfile.apiKey.trim().length > 0
+    );
+    return isLocalhost || hasKey;
+  }, [isCf, currentProfile.baseUrl, currentProfile.apiKey]);
+
+  const loadModels = useCallback(async (profileToFetch: EndpointProfile) => {
+    setLoadingModelsId(profileToFetch.id);
+    try {
+      const models = await fetchModelsForProfile(profileToFetch);
+      if (models.length > 0) {
+        setDiscoveredModelsByProfile((prev) => ({
+          ...prev,
+          [profileToFetch.id]: models,
+        }));
+      }
+    } finally {
+      setLoadingModelsId((curr) =>
+        curr === profileToFetch.id ? null : curr
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !canFetchRemoteModels) return;
+    const timer = setTimeout(() => {
+      void loadModels(currentProfile);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [
+    isOpen,
+    canFetchRemoteModels,
+    currentProfile,
+    loadModels,
+  ]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,13 +127,28 @@ export function ProfileManagerModal({
 
   if (!isOpen) return null;
 
-  const currentProfile =
-    profiles.find((p) => p.id === selectedId) || profiles[0];
+  const commonModelsList = isCf
+    ? [...CLOUDFLARE_BUILT_IN_MODELS]
+    : discoveredModelsByProfile[currentProfile.id]?.length
+      ? discoveredModelsByProfile[currentProfile.id]
+      : getDefaultModelsForProfile(currentProfile);
 
   const handleUpdateCurrent = (patch: Partial<EndpointProfile>) => {
-    const next = profiles.map((p) =>
-      p.id === currentProfile.id ? { ...p, ...patch } : p
-    );
+    const next = profiles.map((p) => {
+      if (p.id !== currentProfile.id) return p;
+      const merged: EndpointProfile = { ...p, ...patch };
+      if (isCloudflareProfile(merged)) {
+        const nextModel = normalizeCloudflareModelId(merged.defaultModel);
+        const nextAcct =
+          patch.cloudflareAccountId !== undefined
+            ? patch.cloudflareAccountId.trim()
+            : extractCloudflareAccountId(merged);
+        merged.defaultModel = nextModel;
+        merged.cloudflareAccountId = nextAcct;
+        merged.baseUrl = buildCloudflareEndpointUrl(nextAcct, nextModel);
+      }
+      return merged;
+    });
     onSaveProfiles(next);
   };
 
@@ -208,6 +292,7 @@ export function ProfileManagerModal({
 
           {/* Right editor */}
           <div className="space-y-5 p-6 md:col-span-7">
+            {/* 1. Profile Name */}
             <div>
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-semibold text-zinc-200">
@@ -228,80 +313,85 @@ export function ProfileManagerModal({
               />
             </div>
 
-            <div>
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-zinc-200">
-                  Base URL 端點根網址
-                </label>
-                <span className="font-mono text-xs text-zinc-400">
-                  {currentProfile.baseUrl.includes('/ai/run/')
-                    ? 'Cloudflare Workers AI 端點'
-                    : '自動附加 /v1/systemone'}
-                </span>
+            {/* 2. CLOUDFLARE_ACCOUNT_ID (for Cloudflare) OR Base URL (for other profiles) */}
+            {isCf ? (
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-semibold text-zinc-200">
+                    CLOUDFLARE_ACCOUNT_ID 帳戶識別碼
+                  </label>
+                  <span className="font-mono text-xs text-zinc-400">
+                    端點將自動組成
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={cfAccountId}
+                  onChange={(e) =>
+                    handleUpdateCurrent({
+                      cloudflareAccountId: e.target.value,
+                    })
+                  }
+                  placeholder="輸入您的 Cloudflare Account ID（留空則於 cURL 使用 $CLOUDFLARE_ACCOUNT_ID）"
+                  className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
+                />
+                <div className="mt-2 rounded-lg border border-[#232732] bg-[#090a0d] px-3 py-2 font-mono text-xs break-all text-zinc-400">
+                  <span className="text-zinc-500">自動組成端點：</span>{' '}
+                  <span className="text-amber-300/90">
+                    {buildCloudflareEndpointUrl(
+                      cfAccountId,
+                      currentProfile.defaultModel
+                    )}
+                  </span>
+                </div>
               </div>
-              <input
-                type="text"
-                value={currentProfile.baseUrl}
-                onChange={(e) =>
-                  handleUpdateCurrent({ baseUrl: e.target.value })
-                }
-                placeholder="http://localhost:11434"
-                className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
-              />
+            ) : (
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-semibold text-zinc-200">
+                    Base URL 端點根網址
+                  </label>
+                  <span className="font-mono text-xs text-zinc-400">
+                    自動附加 /v1/systemone
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={currentProfile.baseUrl}
+                  onChange={(e) =>
+                    handleUpdateCurrent({ baseUrl: e.target.value })
+                  }
+                  placeholder="http://localhost:11434"
+                  className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
+                />
 
-              {/* Quick Templates */}
-              <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                <span className="text-xs text-zinc-400">快速套用位址：</span>
-                {BASE_URL_TEMPLATES.map((tpl) => (
-                  <button
-                    key={tpl.url}
-                    type="button"
-                    onClick={() =>
-                      handleUpdateCurrent({
-                        baseUrl: tpl.url,
-                        defaultModel: tpl.defaultModel,
-                      })
-                    }
-                    className="rounded-lg border border-[#2c313f] bg-[#181b22] px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-200"
-                  >
-                    {tpl.label}
-                  </button>
-                ))}
+                {/* Quick Templates: ONLY shown for non-built-in custom profiles */}
+                {!isBuiltInProfile && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-zinc-400">
+                      快速套用位址：
+                    </span>
+                    {BASE_URL_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.url}
+                        type="button"
+                        onClick={() =>
+                          handleUpdateCurrent({
+                            baseUrl: tpl.url,
+                            defaultModel: tpl.defaultModel,
+                          })
+                        }
+                        className="rounded-lg border border-[#2c313f] bg-[#181b22] px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-200"
+                      >
+                        {tpl.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
-            <div>
-              <label className="block text-sm font-semibold text-zinc-200">
-                Model Name 預設模型名稱
-              </label>
-              <input
-                type="text"
-                value={currentProfile.defaultModel}
-                onChange={(e) =>
-                  handleUpdateCurrent({ defaultModel: e.target.value })
-                }
-                placeholder="clef:cloud / clef / clef-flash / jev-1.13.0"
-                className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
-              />
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-xs text-zinc-400">常用模型：</span>
-                {['clef', 'clef-flash', 'clef:cloud', 'jev-1.13.0'].map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => handleUpdateCurrent({ defaultModel: m })}
-                    className={`rounded-md px-2.5 py-1 font-mono text-xs font-medium transition ${
-                      currentProfile.defaultModel === m
-                        ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
-                        : 'bg-[#181b22] text-zinc-300 hover:bg-[#222631]'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+            {/* 3. API Key (placed BEFORE Model Name as requested) */}
             <div>
               <label className="block text-sm font-semibold text-zinc-200">
                 API Key 金鑰（選填，僅儲存於本機瀏覽器 LocalStorage）
@@ -328,6 +418,69 @@ export function ProfileManagerModal({
                     <Eye className="h-4 w-4" />
                   )}
                 </button>
+              </div>
+            </div>
+
+            {/* 4. Model Name (placed AFTER API Key, with dynamic /models discovery for clef/jev) */}
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-zinc-200">
+                  Model Name 預設模型名稱
+                </label>
+                {canFetchRemoteModels && (
+                  <button
+                    type="button"
+                    onClick={() => void loadModels(currentProfile)}
+                    disabled={loadingModelsId === currentProfile.id}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-amber-300/90 transition hover:text-amber-200 disabled:opacity-50"
+                    title="從 /models 端點重新載入並篩選 clef / jev 相關模型"
+                  >
+                    <RefreshCw
+                      className={`h-3 w-3 ${
+                        loadingModelsId === currentProfile.id
+                          ? 'animate-spin'
+                          : ''
+                      }`}
+                    />
+                    <span>
+                      {loadingModelsId === currentProfile.id
+                        ? '正在查詢 /models...'
+                        : discoveredModelsByProfile[currentProfile.id]?.length
+                          ? `已從 /models 篩選 (${discoveredModelsByProfile[currentProfile.id].length})`
+                          : '從 /models 取得模型'}
+                    </span>
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={currentProfile.defaultModel}
+                onChange={(e) =>
+                  handleUpdateCurrent({ defaultModel: e.target.value })
+                }
+                placeholder={
+                  isCf
+                    ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
+                    : 'clef:cloud / clef / jev-1.13.0'
+                }
+                className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-zinc-400">常用模型：</span>
+                {commonModelsList.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleUpdateCurrent({ defaultModel: m })}
+                    className={`rounded-md px-2.5 py-1 font-mono text-xs font-medium transition ${
+                      currentProfile.defaultModel === m
+                        ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
+                        : 'bg-[#181b22] text-zinc-300 hover:bg-[#222631]'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
               </div>
             </div>
 

@@ -41,28 +41,219 @@ export function normalizeScoreProbabilities(
 }
 
 /**
+ * Check whether an EndpointProfile targets Cloudflare Workers AI
+ */
+export function isCloudflareProfile(
+  profile: Pick<EndpointProfile, 'id' | 'name' | 'baseUrl'>
+): boolean {
+  const id = (profile.id || '').toLowerCase();
+  const name = (profile.name || '').toLowerCase();
+  const url = (profile.baseUrl || '').toLowerCase();
+  return (
+    id === 'cloudflare-workers-ai-clef' ||
+    id.includes('cloudflare') ||
+    name.includes('cloudflare') ||
+    url.includes('/client/v4/accounts/') ||
+    url.includes('/ai/run/')
+  );
+}
+
+/**
+ * Normalize a Cloudflare Workers AI model identifier into `@cf/cloudflare/...` format
+ */
+export function normalizeCloudflareModelId(model?: string): string {
+  const m = (model || '').trim();
+  if (!m) return '@cf/cloudflare/clef';
+  if (m.startsWith('@cf/')) return m;
+  if (m === 'clef' || m === 'clef-omni' || m === 'clef-flash') {
+    return `@cf/cloudflare/${m}`;
+  }
+  return `@cf/cloudflare/${m.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Extract the short model selector (`clef`, `clef-omni`, `clef-flash`) for Cloudflare's JSON body `model` field
+ */
+export function getCloudflarePayloadModelSelector(model?: string): string {
+  const norm = normalizeCloudflareModelId(model);
+  return norm.replace(/^@cf\/cloudflare\//, '');
+}
+
+/**
+ * Extract Cloudflare Account ID from `profile.cloudflareAccountId` or from an existing URL
+ */
+export function extractCloudflareAccountId(
+  profile: Pick<EndpointProfile, 'cloudflareAccountId' | 'baseUrl'>
+): string {
+  if (typeof profile.cloudflareAccountId === 'string') {
+    return profile.cloudflareAccountId.trim();
+  }
+  const match = (profile.baseUrl || '').match(
+    /\/client\/v4\/accounts\/([^/]+)\/ai\/run/i
+  );
+  if (match && match[1] && match[1] !== '$CLOUDFLARE_ACCOUNT_ID') {
+    return match[1].trim();
+  }
+  return '';
+}
+
+/**
+ * Automatically compose the full Cloudflare Workers AI `/ai/run/@cf/cloudflare/...` endpoint URL
+ */
+export function buildCloudflareEndpointUrl(
+  accountId?: string,
+  model?: string
+): string {
+  const acct = (accountId || '').trim() || '$CLOUDFLARE_ACCOUNT_ID';
+  const cfModel = normalizeCloudflareModelId(model);
+  return `https://api.cloudflare.com/client/v4/accounts/${acct}/ai/run/${cfModel}`;
+}
+
+/**
  * Format or resolve the target endpoint URL for a given baseUrl and model:
- * - Cloudflare Workers AI URLs containing `/ai/run/` are kept as-is (or switched to `@cf/cloudflare/clef-flash` when model is `clef-flash`).
+ * - Cloudflare Workers AI URLs are composed automatically using Account ID + `@cf/cloudflare/...` model path.
  * - Standard SystemOne endpoints have `/v1/systemone` appended if not already present.
  */
 export function formatEndpointPreviewUrl(
   baseUrl: string,
-  model?: string
+  model?: string,
+  cloudflareAccountId?: string
 ): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
-  if (clean.includes('/ai/run/')) {
-    if (
-      model?.trim() === 'clef-flash' &&
-      clean.endsWith('/@cf/cloudflare/clef')
-    ) {
-      return clean.replace(
-        /\/@cf\/cloudflare\/clef$/,
-        '/@cf/cloudflare/clef-flash'
-      );
-    }
-    return clean;
+  if (
+    clean.includes('/ai/run/') ||
+    clean.includes('/client/v4/accounts/') ||
+    typeof cloudflareAccountId === 'string'
+  ) {
+    const match = clean.match(/\/client\/v4\/accounts\/([^/]+)\/ai\/run/i);
+    const resolvedAccount =
+      (cloudflareAccountId ?? '').trim() ||
+      (match && match[1] ? match[1].trim() : '$CLOUDFLARE_ACCOUNT_ID');
+    return buildCloudflareEndpointUrl(resolvedAccount, model);
   }
   return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
+}
+
+/**
+ * Get the built-in fallback models for a given profile before `/models` discovery
+ */
+export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
+  if (isCloudflareProfile(profile)) {
+    return [
+      '@cf/cloudflare/clef',
+      '@cf/cloudflare/clef-omni',
+      '@cf/cloudflare/clef-flash',
+    ];
+  }
+  if (profile.id === 's1-builtin-simulator') {
+    return ['clef-simulator'];
+  }
+  if (profile.id === 'ollama-cloud-clef' || profile.baseUrl.includes('ollama.com')) {
+    return ['clef:cloud', 'clef'];
+  }
+  if (profile.id === 'ollama-local-clef' || profile.baseUrl.includes('11434')) {
+    return ['clef', 'clef:cloud'];
+  }
+  if (profile.id === 'typesafe-ai-jev' || profile.baseUrl.includes('typesafe.ai')) {
+    return ['jev-1.13.0'];
+  }
+  return ['clef', 'clef:cloud', 'jev-1.13.0'];
+}
+
+/**
+ * Query `/models` (and `/v1/models`, `/api/tags`) for a profile when its endpoint and API key are valid,
+ * filtering for `clef` or `jev` related models.
+ */
+export async function fetchModelsForProfile(
+  profile: EndpointProfile
+): Promise<string[]> {
+  if (isCloudflareProfile(profile)) {
+    return [
+      '@cf/cloudflare/clef',
+      '@cf/cloudflare/clef-omni',
+      '@cf/cloudflare/clef-flash',
+    ];
+  }
+
+  const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
+  if (!baseUrlClean || baseUrlClean.startsWith('/api/')) {
+    return getDefaultModelsForProfile(profile);
+  }
+
+  const isLocalhost =
+    baseUrlClean.includes('localhost') || baseUrlClean.includes('127.0.0.1');
+  const hasApiKey = Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
+
+  if (!isLocalhost && !hasApiKey) {
+    return [];
+  }
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  if (hasApiKey) {
+    headers['Authorization'] = `Bearer ${profile.apiKey.trim()}`;
+  }
+
+  if (profile.useProxy) {
+    headers['x-s1-target-url'] = baseUrlClean;
+    headers['x-s1-proxy-action'] = 'models';
+    const res = await fetch('/api/proxy', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { models?: string[] };
+    return Array.isArray(data.models) ? data.models : [];
+  }
+
+  const rootBase = baseUrlClean.replace(/\/v1(\/systemone)?$/, '');
+  const candidateUrls = [
+    `${rootBase}/v1/models`,
+    `${rootBase}/models`,
+    `${rootBase}/api/tags`,
+  ];
+  const discovered = new Set<string>();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, { method: 'GET', headers });
+      if (!res.ok) continue;
+      const data = (await res.json()) as Record<string, unknown>;
+      const list = Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.models)
+          ? data.models
+          : Array.isArray(data?.result)
+            ? data.result
+            : Array.isArray(data)
+              ? data
+              : [];
+
+      for (const item of list) {
+        const name =
+          typeof item === 'string'
+            ? item
+            : typeof item === 'object' && item !== null
+              ? String(
+                  (item as Record<string, unknown>).id ||
+                    (item as Record<string, unknown>).name ||
+                    (item as Record<string, unknown>).model ||
+                    ''
+                )
+              : '';
+        if (name && /(clef|jev)/i.test(name)) {
+          discovered.add(name);
+        }
+      }
+      if (discovered.size > 0) break;
+    } catch {
+      // ignore and try next candidate
+    }
+  }
+
+  return Array.from(discovered);
 }
 
 /**
@@ -448,16 +639,47 @@ export async function executeSystemOneRequest(
   payload: S1RequestPayload,
   overrideModel?: string
 ): Promise<ExecutionRunMeta> {
-  const modelToUse = (overrideModel ?? payload.model ?? profile.defaultModel).trim();
+  const isCf = isCloudflareProfile(profile);
+  const rawModelToUse = (
+    overrideModel ??
+    payload.model ??
+    profile.defaultModel
+  ).trim();
+  const modelToUse = isCf
+    ? normalizeCloudflareModelId(rawModelToUse)
+    : rawModelToUse;
+
   const finalPayload: S1RequestPayload = {
     ...payload,
-    ...(modelToUse ? { model: modelToUse } : {}),
+    ...(modelToUse
+      ? {
+          model: isCf
+            ? getCloudflarePayloadModelSelector(modelToUse)
+            : modelToUse,
+        }
+      : {}),
+    ...(isCf && Array.isArray(payload.images)
+      ? {
+          images: payload.images.map((img) =>
+            img.startsWith('data:') ? img : `data:image/png;base64,${img}`
+          ),
+        }
+      : {}),
   };
 
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const isInternalMock = baseUrlClean.startsWith('/api/');
 
-  const targetEndpoint = formatEndpointPreviewUrl(baseUrlClean, modelToUse);
+  const targetEndpoint = isCf
+    ? buildCloudflareEndpointUrl(
+        extractCloudflareAccountId(profile),
+        modelToUse
+      )
+    : formatEndpointPreviewUrl(
+        baseUrlClean,
+        modelToUse,
+        profile.cloudflareAccountId
+      );
 
   if (targetEndpoint.includes('$CLOUDFLARE_ACCOUNT_ID')) {
     return {
@@ -468,7 +690,7 @@ export async function executeSystemOneRequest(
       statusText: 'Missing Account ID',
       latencyMs: 0,
       error:
-        '若要在瀏覽器直接呼叫 Cloudflare Workers AI，請點選上方「端點與金鑰設定」，將 Base URL 中的 $CLOUDFLARE_ACCOUNT_ID 替換為您的 Cloudflare Account ID 並填入 API Key；或直接點擊右上角「cURL | jq」複製指令至終端機執行。',
+        '若要在瀏覽器直接呼叫 Cloudflare Workers AI，請點選上方「端點與金鑰設定」，於 CLOUDFLARE_ACCOUNT_ID 欄位填入您的 Cloudflare Account ID 與 API Key；或直接點擊右上角「cURL | jq」複製指令至終端機執行。',
       timestamp: Date.now(),
     };
   }

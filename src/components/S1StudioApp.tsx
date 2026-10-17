@@ -18,9 +18,13 @@ import {
   saveProfilesToLocalStorage,
 } from '@/lib/db';
 import {
+  buildCloudflareEndpointUrl,
   builderItemsToQuestionsRecord,
   executeSystemOneRequest,
+  extractCloudflareAccountId,
   formatEndpointPreviewUrl,
+  getDefaultModelsForProfile,
+  isCloudflareProfile,
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
@@ -146,9 +150,15 @@ export function S1StudioApp() {
   };
 
   const updateActiveProfileInline = (patch: Partial<EndpointProfile>) => {
-    const next = profiles.map((p) =>
-      p.id === activeProfile.id ? { ...p, ...patch } : p
-    );
+    const next = profiles.map((p) => {
+      if (p.id !== activeProfile.id) return p;
+      const merged: EndpointProfile = { ...p, ...patch };
+      if (isCloudflareProfile(merged)) {
+        const acct = extractCloudflareAccountId(merged);
+        merged.baseUrl = buildCloudflareEndpointUrl(acct, merged.defaultModel);
+      }
+      return merged;
+    });
     handleSaveProfiles(next);
   };
 
@@ -470,7 +480,7 @@ export function S1StudioApp() {
 
               <div className="h-4 w-px bg-[#252934]" />
 
-              {/* Inline Model input with full width for clef-simulator / jev-1.13.0 */}
+              {/* Inline Model input with full width for @cf/cloudflare/clef-flash / clef-simulator / jev-1.13.0 */}
               <span className="text-xs font-semibold text-zinc-400">
                 Model:
               </span>
@@ -481,15 +491,16 @@ export function S1StudioApp() {
                 onChange={(e) =>
                   updateActiveProfileInline({ defaultModel: e.target.value })
                 }
-                placeholder="clef / clef:cloud"
+                placeholder="@cf/cloudflare/clef / clef:cloud"
                 title="當前模型名稱 (Model Name)"
-                className="w-36 rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none"
+                className={`${
+                  isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'
+                } rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none`}
               />
               <datalist id="s1-models-datalist">
-                <option value="clef" />
-                <option value="clef-flash" />
-                <option value="clef:cloud" />
-                <option value="jev-1.13.0" />
+                {getDefaultModelsForProfile(activeProfile).map((m) => (
+                  <option key={m} value={m} />
+                ))}
               </datalist>
 
               {/* Manage Profiles & API Key Modal Button */}
@@ -571,7 +582,8 @@ export function S1StudioApp() {
             onClick={() => setIsProfileModalOpen(true)}
             title={formatEndpointPreviewUrl(
               activeProfile.baseUrl,
-              activeProfile.defaultModel
+              activeProfile.defaultModel,
+              activeProfile.cloudflareAccountId
             )}
             className="hidden items-center gap-1.5 rounded-lg border border-[#252934] bg-[#0b0c0e] px-2.5 py-1.5 font-mono text-xs text-zinc-300 transition hover:border-[#383f52] hover:text-zinc-100 xl:flex"
           >
@@ -579,7 +591,8 @@ export function S1StudioApp() {
             <span className="max-w-[260px] truncate">
               {formatEndpointPreviewUrl(
                 activeProfile.baseUrl,
-                activeProfile.defaultModel
+                activeProfile.defaultModel,
+                activeProfile.cloudflareAccountId
               )}
             </span>
           </button>
@@ -624,7 +637,8 @@ export function S1StudioApp() {
                 onClick={() => setIsProfileModalOpen(true)}
                 title={formatEndpointPreviewUrl(
                   activeProfile.baseUrl,
-                  activeProfile.defaultModel
+                  activeProfile.defaultModel,
+                  activeProfile.cloudflareAccountId
                 )}
                 className="hidden items-center gap-1.5 rounded border border-[#222632] bg-[#0b0c0e] px-2.5 py-0.5 font-mono text-xs text-zinc-300 transition hover:border-[#383f52] hover:text-zinc-100 md:inline-flex xl:hidden"
               >
@@ -632,7 +646,8 @@ export function S1StudioApp() {
                 <span className="max-w-[260px] truncate">
                   {formatEndpointPreviewUrl(
                     activeProfile.baseUrl,
-                    activeProfile.defaultModel
+                    activeProfile.defaultModel,
+                    activeProfile.cloudflareAccountId
                   )}
                 </span>
               </button>

@@ -70,6 +70,7 @@ export interface EndpointProfile {
   id: string;
   name: string;
   baseUrl: string;
+  cloudflareAccountId?: string;
   apiKey: string;
   defaultModel: string;
   useProxy: boolean;
