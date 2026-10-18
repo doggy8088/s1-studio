@@ -19,6 +19,46 @@
 - **雙發送模式（Direct Mode / Proxy Mode）**：
   - **Direct Mode**：由瀏覽器直接發送 `fetch` 請求（適合測試本機已設定 `OLLAMA_ORIGINS` 的 Local Ollama）。
   - **Proxy Mode**：透過內建無狀態 `/api/proxy`（本機為 Next.js API Route，部署至 Cloudflare Pages 時自動轉換為 Cloudflare Edge Worker `functions/api/proxy.ts`）轉發請求，解決雲端 API CORS 阻擋問題，且不留存任何 Payload 與金鑰。
+- **URL Deep Link 匯入**：支援以查詢參數自動建立或切換 Profile、載入場景範本，方便其他網站一鍵跳轉測試（詳見下節）。
+
+#### 1.1 從網址一鍵匯入 Profile 與場景範本 (Deep Link)
+
+其他網站或內部文件可直接以查詢參數連結至 S1 Studio，自動建立或切換端點 Profile，並載入指定的場景範本：
+
+| 參數 | 必填 | 說明 |
+| --- | --- | --- |
+| `profile` | 匯入 Profile 時必填 | Profile 名稱。以名稱比對（先比對完全相同，再忽略大小寫與前後空白）。只傳 `profile` 時，若名稱存在會直接切換。 |
+| `baseUrl` | 新增 Profile 時必填 | 端點根網址，例如 `https://api.example.com`；僅接受 `http(s)` 或站內 `/api/...` 路徑。不可包含帳號密碼、查詢字串或 `#` 片段。 |
+| `model` | 否 | 預設模型，例如 `clef`、`clef:27b`、`jev-latest`。未指定時新 Profile 會依端點推斷（Ollama Cloud `clef:27b`、TypeSafe AI `jev-latest`、內建模擬器 `clef-simulator-1.0`、Cloudflare 使用其預設模型，其餘 `clef`），既有 Profile 保留原值。 |
+| `proxy` | 否 | `1`/`0`、`true`/`false`、`on`/`off`、`yes`/`no`。未指定時，`localhost`、私有 IP 與 `/api/...` 預設 Direct Mode，其餘預設 Proxy Mode。 |
+| `accountId` | 否 | Cloudflare Workers AI 的 Account ID。未指定時會嘗試從 `baseUrl` 解析。 |
+| `preset` | 否 | 內建或自訂場景範本的完整名稱或 ID。載入後可直接按「執行評估」。 |
+
+> 未提供的欄位不會變更既有 Profile。新增 Profile 時，`model` 會依端點推斷，`proxy` 依上述規則推斷，`apiKey` 一律留空。
+
+**範例（Profile + 場景範本）**：
+
+```text
+https://s1-studio.miniasp.com/?profile=My%20Endpoint&baseUrl=https%3A%2F%2Fapi.example.com&model=clef&proxy=1&preset=preset-prompt-injection
+```
+
+**範例（只載入場景範本，不變更 Profile）**：
+
+```text
+https://s1-studio.miniasp.com/?preset=preset-prompt-injection
+```
+
+**匯入行為**：
+
+- **名稱不存在**：建立新 Profile（API Key 一律留空），切換為當前端點，並顯示非阻斷通知。
+- **名稱存在且設定相同（忽略 API Key）**：直接切換，不顯示確認視窗。
+- **名稱存在但設定不同**：跳出確認視窗。選擇「覆寫並切換」只會更新端點、模型、傳送模式等設定，**本機已儲存的 API Key 會保留**；選擇「保留現有並切換」則不變更任何設定。
+- **場景範本**：先以 ID 精確比對，再以完整名稱比對；內建範本優先於自訂範本。名稱或參數值含中文、空白或特殊字元時，請使用 `encodeURIComponent` 編碼。
+
+> [!IMPORTANT]
+> 基於安全考量，本功能**不接受** `apiKey`、`token`、`secret`、`password`、`authorization` 等敏感參數。若網址帶有這些參數，會自動忽略並從網址移除，同時顯示警告；`baseUrl` 也不可內嵌帳密或敏感查詢參數。API Key 只應儲存在瀏覽器本機，覆寫既有 Profile 時會保留本機金鑰。`baseUrl` 仍可能出現在瀏覽器紀錄或伺服器日誌中，請勿將任何密鑰放在路徑裡。
+>
+> 匯入完成後，S1 Studio 會使用 `history.replaceState` 移除上述匯入參數，避免重新整理時重複匯入。請只匯入您信任的端點；執行評估時 State 與圖片會傳送至該端點。
 
 ### 2. 狀態與多模態視覺輸入 (State & Multimodal Input)
 - **State 雙模式**：支援 `Text 純文字` 與 `JSON 結構`（CodeMirror 6 語法高亮與即時格式檢查，送出時自動以原生 JSON Object/Array 封裝而非轉義字串）。

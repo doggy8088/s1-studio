@@ -1,10 +1,17 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   EndpointProfile,
   ExecutionRunMeta,
   QuestionBuilderItem,
+  S1PresetDefinition,
   S1Question,
   S1RequestPayload,
   UploadedImageItem,
@@ -13,10 +20,19 @@ import { BUILT_IN_PRESETS, DEFAULT_PROFILES } from '@/lib/presets';
 import {
   addHistoryEntry,
   loadActiveProfileId,
+  loadCustomPresets,
   loadProfilesFromLocalStorage,
   saveActiveProfileId,
   saveProfilesToLocalStorage,
 } from '@/lib/db';
+import {
+  buildUrlWithoutProfileLinkParams,
+  createImportedProfileId,
+  parseProfileLinkSearch,
+  planProfileUrlImport,
+  resolvePresetFromQuery,
+  type ProfileImportConflict,
+} from '@/lib/profile-link';
 import {
   LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
@@ -50,6 +66,7 @@ import { ResultCards } from './ResultCards';
 import { CodeExportPanel } from './CodeExportPanel';
 import { ProfileManagerModal } from './ProfileManagerModal';
 import { PresetsAndHistoryModal } from './PresetsAndHistoryModal';
+import { ProfileImportConflictModal } from './ProfileImportConflictModal';
 import {
   Play,
   Settings2,
@@ -73,7 +90,100 @@ import {
   AlertTriangle,
   Sun,
   Moon,
+  Info,
+  X,
 } from 'lucide-react';
+
+type UrlNoticeTone = 'success' | 'info' | 'warning' | 'error';
+
+interface UrlNotice {
+  tone: UrlNoticeTone;
+  title: string;
+  message: string;
+}
+
+const URL_NOTICE_PRIORITY: Record<UrlNoticeTone, number> = {
+  info: 0,
+  success: 1,
+  warning: 2,
+  error: 3,
+};
+
+function mergeUrlNotice(
+  previous: UrlNotice | null,
+  tone: UrlNoticeTone,
+  title: string,
+  message: string
+): UrlNotice {
+  if (!previous) {
+    return { tone, title, message };
+  }
+  return {
+    tone:
+      URL_NOTICE_PRIORITY[tone] > URL_NOTICE_PRIORITY[previous.tone]
+        ? tone
+        : previous.tone,
+    title: previous.title,
+    message: `${previous.message}\n${message}`,
+  };
+}
+
+function UrlImportNoticeCard({
+  notice,
+  onClose,
+}: {
+  notice: UrlNotice;
+  onClose: () => void;
+}) {
+  const { frame, iconColor, Icon } = {
+    success: {
+      frame: 'border-emerald-500/40 bg-[#0d1a15]/95',
+      iconColor: 'text-emerald-400',
+      Icon: Check,
+    },
+    info: {
+      frame: 'border-sky-500/40 bg-[#0d1520]/95',
+      iconColor: 'text-sky-400',
+      Icon: Info,
+    },
+    warning: {
+      frame: 'border-amber-500/40 bg-[#1b1710]/95',
+      iconColor: 'text-amber-400',
+      Icon: AlertTriangle,
+    },
+    error: {
+      frame: 'border-rose-500/40 bg-[#1d1114]/95',
+      iconColor: 'text-rose-400',
+      Icon: AlertCircle,
+    },
+  }[notice.tone];
+
+  return (
+    <div
+      className={`fixed right-4 bottom-4 left-4 z-[60] max-w-md rounded-2xl border p-4 shadow-2xl backdrop-blur-md sm:left-auto ${frame}`}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-start gap-3">
+        <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${iconColor}`} />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold text-zinc-100">{notice.title}</div>
+          <p className="mt-1 max-h-[35vh] overflow-y-auto text-xs leading-relaxed break-words whitespace-pre-line text-zinc-300">
+            {notice.message}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg p-1 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-100"
+          aria-label="關閉通知"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function S1StudioApp() {
   // -------------------------------------------------------------------------
@@ -88,33 +198,9 @@ export function S1StudioApp() {
     DEFAULT_PROFILES[3]?.id || DEFAULT_PROFILES[1].id
   );
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>('dark');
-
-  // Hydrate saved profiles, activeProfileId & theme on client mount to avoid SSR hydration mismatch
-  useEffect(() => {
-    queueMicrotask(() => {
-      const loaded = loadProfilesFromLocalStorage();
-      const saved = loadActiveProfileId();
-      setProfiles(loaded);
-      if (loaded.some((p) => p.id === saved)) {
-        setActiveProfileId(saved);
-      } else if (loaded[0]) {
-        setActiveProfileId(loaded[0].id);
-      }
-      try {
-        const currentAttr = document.documentElement.dataset.theme;
-        const storedTheme = localStorage.getItem('s1_studio_theme_v1');
-        if (currentAttr === 'light' || storedTheme === 'light') {
-          setThemeMode('light');
-          document.documentElement.dataset.theme = 'light';
-        } else {
-          setThemeMode('dark');
-          document.documentElement.dataset.theme = 'dark';
-        }
-      } catch {
-        // ignore storage restrictions
-      }
-    });
-  }, []);
+  const [urlNotice, setUrlNotice] = useState<UrlNotice | null>(null);
+  const [profileImportConflict, setProfileImportConflict] =
+    useState<ProfileImportConflict | null>(null);
 
   const toggleThemeMode = useCallback(() => {
     setThemeMode((prev) => {
@@ -156,6 +242,200 @@ export function S1StudioApp() {
     () => questionsRecordToBuilderItems(initialPreset.questions)
   );
 
+  const hasHydratedClientStateRef = useRef(false);
+
+  // Hydrate saved profiles, theme, deep-link imports and preset on client mount.
+  useEffect(() => {
+    queueMicrotask(() => {
+      if (hasHydratedClientStateRef.current) return;
+      hasHydratedClientStateRef.current = true;
+
+      const loadedProfiles = loadProfilesFromLocalStorage();
+      const savedActiveId = loadActiveProfileId();
+      let nextProfiles = loadedProfiles;
+      let nextActiveId = loadedProfiles.some((p) => p.id === savedActiveId)
+        ? savedActiveId
+        : loadedProfiles[0]?.id || DEFAULT_PROFILES[0].id;
+
+      const link = parseProfileLinkSearch(
+        typeof window === 'undefined' ? '' : window.location.search
+      );
+
+      if (link.hasAnyImportParam && typeof window !== 'undefined') {
+        try {
+          window.history.replaceState(
+            window.history.state,
+            '',
+            buildUrlWithoutProfileLinkParams(window.location.href)
+          );
+        } catch {
+          // Ignore URL rewriting failures in restricted browsing contexts.
+        }
+      }
+
+      if (link.errors.length > 0) {
+        setUrlNotice((prev) =>
+          mergeUrlNotice(
+            prev,
+            'error',
+            '網址參數格式有誤',
+            link.errors.join('\n')
+          )
+        );
+      } else if (link.profile) {
+        const plan = planProfileUrlImport(
+          loadedProfiles,
+          link.profile,
+          createImportedProfileId()
+        );
+
+        if (plan.kind === 'create') {
+          nextProfiles = [...loadedProfiles, plan.profile];
+          nextActiveId = plan.profile.id;
+          setUrlNotice((prev) =>
+            mergeUrlNotice(
+              prev,
+              'success',
+              '已從網址建立 Profile',
+              `已新增「${plan.profile.name}」並切換為當前端點。\n端點：${plan.profile.baseUrl}\n新 Profile 的 API Key 一律留空，請至「端點與金鑰設定」填入。\n提醒：僅匯入您信任的端點；執行評估時 State 與圖片會傳送至該端點。`
+            )
+          );
+        } else if (plan.kind === 'switch') {
+          const matched = loadedProfiles.find(
+            (profile) => profile.id === plan.profileId
+          );
+          nextActiveId = plan.profileId;
+          if (plan.profileId !== savedActiveId) {
+            setUrlNotice((prev) =>
+              mergeUrlNotice(
+                prev,
+                'info',
+                '已切換 Profile',
+                `設定內容相同，已直接切換至「${
+                  matched?.name || plan.profileId
+                }」。`
+              )
+            );
+          }
+        } else if (plan.kind === 'conflict') {
+          setProfileImportConflict(plan.conflict);
+          setUrlNotice((prev) =>
+            mergeUrlNotice(
+              prev,
+              'warning',
+              'Profile 設定衝突',
+              `「${plan.conflict.existing.name}」已存在但設定不同，請在對話框中確認是否覆寫。`
+            )
+          );
+        } else {
+          setUrlNotice((prev) =>
+            mergeUrlNotice(prev, 'error', '無法匯入 Profile', plan.error)
+          );
+        }
+      }
+
+      if (link.warnings.length > 0) {
+        setUrlNotice((prev) =>
+          mergeUrlNotice(
+            prev,
+            'warning',
+            prev?.title || '已忽略敏感參數',
+            link.warnings.join('\n')
+          )
+        );
+      }
+
+      setProfiles(nextProfiles);
+      setActiveProfileId(nextActiveId);
+      if (nextProfiles !== loadedProfiles) {
+        saveProfilesToLocalStorage(nextProfiles);
+      }
+      if (nextActiveId !== savedActiveId) {
+        saveActiveProfileId(nextActiveId);
+      }
+
+      try {
+        const currentAttr = document.documentElement.dataset.theme;
+        const storedTheme = localStorage.getItem('s1_studio_theme_v1');
+        if (currentAttr === 'light' || storedTheme === 'light') {
+          setThemeMode('light');
+          document.documentElement.dataset.theme = 'light';
+        } else {
+          setThemeMode('dark');
+          document.documentElement.dataset.theme = 'dark';
+        }
+      } catch {
+        // ignore storage restrictions
+      }
+
+      const presetQuery = link.preset;
+      if (presetQuery) {
+        const applyPreset = (preset: S1PresetDefinition) => {
+          setActivePresetId(preset.id);
+          setStateMode(preset.stateMode);
+          setStateText(preset.stateText);
+          setImages(preset.images || []);
+          setQuestionItems(
+            questionsRecordToBuilderItems(preset.questions)
+          );
+          setUrlNotice((prev) =>
+            mergeUrlNotice(
+              prev,
+              'info',
+              prev?.title || '已載入場景範本',
+              `已載入場景範本「${preset.name}」，可直接執行評估。`
+            )
+          );
+        };
+
+        // Built-in presets resolve synchronously; custom presets need IndexedDB.
+        const builtInResolved = resolvePresetFromQuery(
+          presetQuery,
+          BUILT_IN_PRESETS,
+          []
+        );
+        if (builtInResolved.preset) {
+          applyPreset(builtInResolved.preset);
+        } else {
+          void (async () => {
+            let customPresets: S1PresetDefinition[] = [];
+            try {
+              customPresets = await loadCustomPresets();
+            } catch {
+              customPresets = [];
+            }
+
+            const resolved = resolvePresetFromQuery(
+              presetQuery,
+              BUILT_IN_PRESETS,
+              customPresets
+            );
+
+            if (resolved.preset) {
+              applyPreset(resolved.preset);
+            } else {
+              setUrlNotice((prev) =>
+                mergeUrlNotice(
+                  prev,
+                  'warning',
+                  prev?.title || '找不到場景範本',
+                  resolved.error || '找不到指定的場景範本。'
+                )
+              );
+            }
+          })();
+        }
+      }
+    });
+  }, []);
+
+  // Auto-dismiss deep-link notices.
+  useEffect(() => {
+    if (!urlNotice) return;
+    const timer = setTimeout(() => setUrlNotice(null), 12000);
+    return () => clearTimeout(timer);
+  }, [urlNotice]);
+
   // -------------------------------------------------------------------------
   // 3. Evaluation Results & Right Panel Tabs
   // -------------------------------------------------------------------------
@@ -192,6 +472,51 @@ export function S1StudioApp() {
       setActiveProfileId(nextActiveId);
       saveActiveProfileId(nextActiveId);
     }
+  };
+
+  const handleOverwriteProfileImport = () => {
+    const conflict = profileImportConflict;
+    if (!conflict) return;
+
+    const liveExisting = profiles.find((p) => p.id === conflict.existing.id);
+    const nextProfile: EndpointProfile = {
+      ...conflict.proposed,
+      apiKey: liveExisting?.apiKey ?? conflict.existing.apiKey,
+    };
+    const nextProfiles = profiles.some((p) => p.id === nextProfile.id)
+      ? profiles.map((p) => (p.id === nextProfile.id ? nextProfile : p))
+      : [...profiles, nextProfile];
+
+    handleSaveProfiles(nextProfiles, nextProfile.id);
+    setProfileImportConflict(null);
+    setUrlNotice({
+      tone: 'success',
+      title: '已覆寫 Profile 設定',
+      message: `已套用網址設定至「${nextProfile.name}」並切換。本機原有的 API Key 已保留。`,
+    });
+  };
+
+  const handleKeepExistingProfileImport = () => {
+    const conflict = profileImportConflict;
+    if (!conflict) return;
+
+    setActiveProfileId(conflict.existing.id);
+    saveActiveProfileId(conflict.existing.id);
+    setProfileImportConflict(null);
+    setUrlNotice({
+      tone: 'info',
+      title: '已保留現有 Profile',
+      message: `已切換至「${conflict.existing.name}」，原有設定未變更。`,
+    });
+  };
+
+  const handleCancelProfileImport = () => {
+    setProfileImportConflict(null);
+    setUrlNotice({
+      tone: 'info',
+      title: '已取消 Profile 匯入',
+      message: '本機 Profile 設定未變更。',
+    });
   };
 
   const updateActiveProfileInline = (patch: Partial<EndpointProfile>) => {
@@ -1392,6 +1717,20 @@ export function S1StudioApp() {
         currentPayload={constructedPayload}
         onApplyPresetOrHistory={applyPresetData}
       />
+
+      <ProfileImportConflictModal
+        conflict={profileImportConflict}
+        onOverwrite={handleOverwriteProfileImport}
+        onKeepExisting={handleKeepExistingProfileImport}
+        onCancel={handleCancelProfileImport}
+      />
+
+      {urlNotice && (
+        <UrlImportNoticeCard
+          notice={urlNotice}
+          onClose={() => setUrlNotice(null)}
+        />
+      )}
     </div>
   );
 }

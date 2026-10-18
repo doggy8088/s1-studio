@@ -216,6 +216,15 @@ export async function deleteHistoryEntry(id: number): Promise<void> {
   await db.history.delete(id);
 }
 
+export async function loadCustomPresets(): Promise<S1PresetDefinition[]> {
+  try {
+    return await db.customPresets.orderBy('createdAt').reverse().toArray();
+  } catch (err) {
+    console.error('Failed to load custom presets from IndexedDB:', err);
+    return [];
+  }
+}
+
 export async function saveCustomPreset(
   preset: S1PresetDefinition
 ): Promise<void> {
