@@ -55,6 +55,19 @@ https://s1-studio.miniasp.com/?preset=preset-prompt-injection
 - **名稱存在但設定不同**：跳出確認視窗。選擇「覆寫並切換」只會更新端點、模型、傳送模式等設定，**本機已儲存的 API Key 會保留**；選擇「保留現有並切換」則不變更任何設定。
 - **場景範本**：先以 ID 精確比對，再以完整名稱比對；內建範本優先於自訂範本。名稱或參數值含中文、空白或特殊字元時，請使用 `encodeURIComponent` 編碼。
 
+**內建場景範本 ID（可直接填入 `preset`）**：
+
+| `preset` ID | 範本名稱 |
+| --- | --- |
+| `preset-support-triage` | 客服工單分類與退款判定 (Support Ticket Triage) |
+| `preset-agent-tool-guard` | AI Agent 工具呼叫安全攔截 (Tool Call Moderation) |
+| `preset-prompt-injection` | Prompt Injection 與安全風險攔截 (Security Guardrail) |
+| `preset-invoice-audit` | 企業採購發票與報銷審核 (Invoice & Expense Audit) |
+| `preset-multimodal-bimodal` | 多模態截圖診斷與兩極化分佈測試 (Multimodal & Bimodal Demo) |
+| `preset-taiwan-sovereignty` | 臺灣政治與實質治理現況判定 (Sovereignty & Governance Choice) |
+
+> 自訂範本儲存於瀏覽器 IndexedDB，其 ID 由系統產生（格式為 `custom-<timestamp>` 或 `imp-<timestamp>-<序號>`），也可改用完整名稱指定。若自訂範本與內建範本同名，會優先載入內建範本。`local-ollama-clef`、`ollama-cloud-clef` 等為 Profile ID，不可用於 `preset`。
+
 > [!IMPORTANT]
 > 基於安全考量，本功能**不接受** `apiKey`、`token`、`secret`、`password`、`authorization` 等敏感參數。若網址帶有這些參數，會自動忽略並從網址移除，同時顯示警告；`baseUrl` 也不可內嵌帳密或敏感查詢參數。API Key 只應儲存在瀏覽器本機，覆寫既有 Profile 時會保留本機金鑰。`baseUrl` 仍可能出現在瀏覽器紀錄或伺服器日誌中，請勿將任何密鑰放在路徑裡。
 >
