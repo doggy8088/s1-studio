@@ -9,6 +9,16 @@ import {
   S1ResponsePayload,
   ScoreResult,
 } from '@/types/systemone';
+import {
+  GEMINI_DECISIONS_MODELS,
+  buildGeminiDecisionsEndpoint,
+  isGeminiApiUrl,
+  isGeminiDecisionsProfile,
+  normalizeGeminiDecisionsModel,
+  normalizeGeminiUsage,
+  toGeminiDecisionsRequest,
+  validateGeminiDecisionsPayload,
+} from './gemini-decisions';
 
 export const QUESTION_KEY_REGEX = /^[a-zA-Z0-9_.-]{1,100}$/;
 export const MAX_QUESTIONS = 64;
@@ -151,6 +161,9 @@ export function formatEndpointPreviewUrl(
   cloudflareAccountId?: string
 ): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
+  if (isGeminiApiUrl(clean)) {
+    return buildGeminiDecisionsEndpoint(clean);
+  }
   if (
     clean.includes('/ai/run/') ||
     clean.includes('/client/v4/accounts/') ||
@@ -291,6 +304,9 @@ export function isProfileEndpointAndKeyValid(
   ) {
     return true;
   }
+  if (isGeminiDecisionsProfile(profile)) {
+    return Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
+  }
   if (isCloudflareProfile(profile)) {
     const acct = extractCloudflareAccountId(profile);
     const hasKey = Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
@@ -310,6 +326,9 @@ export function isProfileEndpointAndKeyValid(
  * Get the built-in fallback models for a given profile before `/models` discovery
  */
 export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
+  if (isGeminiDecisionsProfile(profile)) {
+    return [...GEMINI_DECISIONS_MODELS];
+  }
   if (isCloudflareProfile(profile)) {
     return [
       '@cf/cloudflare/clef',
@@ -348,6 +367,9 @@ export function getSelectableModelsForProfile(
   profile: EndpointProfile,
   discoveredModels?: string[]
 ): string[] {
+  if (isGeminiDecisionsProfile(profile)) {
+    return [...GEMINI_DECISIONS_MODELS];
+  }
   if (isCloudflareProfile(profile)) {
     return [
       '@cf/cloudflare/clef',
@@ -566,6 +588,9 @@ export async function fetchModelsForProfile(
   profile: EndpointProfile,
   options?: { forceRefresh?: boolean }
 ): Promise<string[]> {
+  if (isGeminiDecisionsProfile(profile)) {
+    return [...GEMINI_DECISIONS_MODELS];
+  }
   if (isCloudflareProfile(profile)) {
     return [
       '@cf/cloudflare/clef',
@@ -796,7 +821,8 @@ export async function pullLocalOllamaModel(
  */
 export function normalizeS1ResponsePayload(
   rawInput: Record<string, unknown>,
-  questions?: Record<string, S1Question>
+  questions?: Record<string, S1Question>,
+  options?: { scoreScale?: ScoreResult['scoreScale'] }
 ): S1ResponsePayload {
   const raw =
     rawInput.result &&
@@ -852,6 +878,7 @@ export function normalizeS1ResponsePayload(
             | number[]
             | Record<string, number>
             | undefined,
+          ...(options?.scoreScale ? { scoreScale: options.scoreScale } : {}),
         };
       }
     }
@@ -1170,6 +1197,9 @@ export async function executeSystemOneRequest(
   payload: S1RequestPayload,
   overrideModel?: string
 ): Promise<ExecutionRunMeta> {
+  if (isGeminiDecisionsProfile(profile)) {
+    return executeGeminiDecisionsRequest(profile, payload, overrideModel);
+  }
   const isCf = isCloudflareProfile(profile);
   const rawModelToUse = stripLocalOllamaStatusSuffix(
     overrideModel ?? payload.model ?? profile.defaultModel
@@ -1341,6 +1371,136 @@ export async function executeSystemOneRequest(
       error: profile.useProxy
         ? `Request failed: ${msg}`
         : `Direct fetch failed (${msg}). 若目標端點阻擋瀏覽器跨域請求 (CORS)，請開啟右上角「Proxy: ON」代理模式。`,
+      timestamp: Date.now(),
+    };
+  }
+}
+
+/**
+ * Execute a request against the Gemini Decisions API (`POST /v1beta/decisions`).
+ * The SystemOne-shaped payload is translated at the wire only, so history entries keep
+ * the S1 shape. Direct mode sends `x-goog-api-key` (the API allows browser CORS);
+ * proxy mode sends `Authorization: Bearer` and the proxy maps it to `x-goog-api-key`.
+ */
+async function executeGeminiDecisionsRequest(
+  profile: EndpointProfile,
+  payload: S1RequestPayload,
+  overrideModel?: string
+): Promise<ExecutionRunMeta> {
+  const modelToUse = normalizeGeminiDecisionsModel(
+    overrideModel ?? payload.model ?? profile.defaultModel
+  );
+  const targetEndpoint = buildGeminiDecisionsEndpoint(profile.baseUrl);
+  const baseMeta = {
+    profileId: profile.id,
+    profileName: profile.name,
+    model: modelToUse,
+  };
+  const apiKey = (profile.apiKey || '').trim();
+
+  if (!apiKey) {
+    return {
+      ...baseMeta,
+      status: 401,
+      statusText: 'Missing API Key',
+      latencyMs: 0,
+      error:
+        '呼叫 Gemini Decisions API 需要 API Key。請點選上方「端點與金鑰設定」填入 Google AI Studio 的 GEMINI_API_KEY（https://aistudio.google.com/apikey），或點擊「cURL | jq」複製指令於終端機執行。',
+      timestamp: Date.now(),
+    };
+  }
+
+  const localIssues = validateGeminiDecisionsPayload(payload);
+  if (localIssues.length > 0) {
+    return {
+      ...baseMeta,
+      status: 400,
+      statusText: 'Invalid Request',
+      latencyMs: 0,
+      error: localIssues.join('\n'),
+      timestamp: Date.now(),
+    };
+  }
+
+  const body = JSON.stringify(toGeminiDecisionsRequest(payload, modelToUse));
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  const startTime = performance.now();
+  try {
+    let response: Response;
+    if (profile.useProxy) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+      headers['x-s1-target-url'] = targetEndpoint;
+      response = await fetch('/api/proxy', { method: 'POST', headers, body });
+    } else {
+      headers['x-goog-api-key'] = apiKey;
+      response = await fetch(targetEndpoint, { method: 'POST', headers, body });
+    }
+
+    const clientLatency = Math.round(performance.now() - startTime);
+    const upstreamHeader = response.headers.get('X-S1-Upstream-Latency');
+    const latencyMs = upstreamHeader ? Number(upstreamHeader) : clientLatency;
+    const rawResponseText = await response.text();
+
+    let parsedJson: S1ResponsePayload | undefined;
+    let errorMsg: string | undefined;
+    try {
+      const parsed = JSON.parse(rawResponseText) as Record<string, unknown>;
+      if (response.ok) {
+        parsedJson = normalizeS1ResponsePayload(
+          {
+            ...parsed,
+            model: typeof parsed.model === 'string' ? parsed.model : modelToUse,
+            usage: normalizeGeminiUsage(parsed.usage),
+          },
+          payload.questions,
+          { scoreScale: 'index' }
+        );
+      } else {
+        const errObj = parsed?.error as
+          | { message?: string; code?: string | number; status?: string }
+          | string
+          | undefined;
+        if (errObj && typeof errObj === 'object') {
+          const code = errObj.status || errObj.code;
+          errorMsg = `${code ? `[${code}] ` : ''}${errObj.message || `HTTP ${response.status}`}`;
+        } else {
+          errorMsg =
+            (typeof errObj === 'string' && errObj) ||
+            (typeof parsed?.message === 'string' && parsed.message) ||
+            `HTTP ${response.status}: ${response.statusText}`;
+        }
+      }
+    } catch {
+      errorMsg = response.ok
+        ? 'Response body is not valid JSON.'
+        : rawResponseText || `HTTP ${response.status} ${response.statusText}`;
+    }
+
+    return {
+      ...baseMeta,
+      status: response.status,
+      statusText: response.statusText || (response.ok ? 'OK' : 'Error'),
+      latencyMs,
+      response: parsedJson,
+      rawResponseText,
+      error: errorMsg,
+      timestamp: Date.now(),
+    };
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error ? err.message : 'Network or CORS error occurred';
+    return {
+      ...baseMeta,
+      status: 0,
+      statusText: 'Network Error',
+      latencyMs: Math.round(performance.now() - startTime),
+      error: profile.useProxy
+        ? `Request failed: ${msg}`
+        : `Direct fetch failed (${msg}). 若瀏覽器無法直接連線 Gemini API，請開啟右上角「Proxy: ON」代理模式。`,
       timestamp: Date.now(),
     };
   }

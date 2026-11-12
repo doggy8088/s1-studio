@@ -33,6 +33,14 @@ jobs:
       - name: Typecheck
         run: make typecheck
 
+      - name: Lint
+        run: make lint
+
+      - name: Test (unit + regression; live Gemini tests run only if GEMINI_API_KEY secret is set)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: make test
+
       - name: Build static export for Cloudflare Pages (out/ + functions/api/*)
         run: make cf-build
 

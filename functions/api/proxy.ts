@@ -31,6 +31,33 @@ function extractClefAndJevModels(payload: unknown): string[] {
   return Array.from(new Set(matched));
 }
 
+// Keep these Gemini helpers identical to src/app/api/proxy/route.ts
+const GEMINI_API_HOST = 'generativelanguage.googleapis.com';
+const GEMINI_DECISIONS_ENDPOINT = `https://${GEMINI_API_HOST}/v1beta/decisions`;
+
+function isGeminiApiHost(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === GEMINI_API_HOST;
+  } catch {
+    return false;
+  }
+}
+
+function resolveGeminiDecisionsEndpoint(cleanedBase: string): string {
+  if (/\/v1beta\/decisions$/i.test(cleanedBase)) return cleanedBase;
+  if (/\/v1beta$/i.test(cleanedBase)) return `${cleanedBase}/decisions`;
+  return GEMINI_DECISIONS_ENDPOINT;
+}
+
+function extractGeminiApiKey(
+  authHeader: string | null,
+  googApiKeyHeader: string | null
+): string {
+  const direct = (googApiKeyHeader || '').trim();
+  if (direct) return direct;
+  return (authHeader || '').replace(/^Bearer\s+/i, '').trim();
+}
+
 export const onRequestOptions = async () => {
   return new Response(null, {
     status: 204,
@@ -38,7 +65,7 @@ export const onRequestOptions = async () => {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers':
-        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action',
+        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key',
     },
   });
 };
@@ -166,8 +193,12 @@ export const onRequestPost = async (context: { request: Request }) => {
       });
     }
 
-    const targetEndpoint =
-      cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
+    // Gemini Decisions API: POST /v1beta/decisions with x-goog-api-key auth
+    const isGeminiTarget = isGeminiApiHost(cleanedBase);
+
+    const targetEndpoint = isGeminiTarget
+      ? resolveGeminiDecisionsEndpoint(cleanedBase)
+      : cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
         ? cleanedBase
         : `${cleanedBase}/v1/systemone`;
 
@@ -209,7 +240,15 @@ export const onRequestPost = async (context: { request: Request }) => {
       Accept: 'application/json',
     };
 
-    if (authHeader && authHeader.trim().length > 0) {
+    if (isGeminiTarget) {
+      const geminiKey = extractGeminiApiKey(
+        authHeader,
+        request.headers.get('x-goog-api-key')
+      );
+      if (geminiKey) {
+        forwardHeaders['x-goog-api-key'] = geminiKey;
+      }
+    } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
     }
 

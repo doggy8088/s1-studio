@@ -762,10 +762,12 @@ function SingleQuestionDiagnostic({
   const bimodal = detectBimodalDistribution(probs);
   const maxLevelIndex = Math.max(1, levels.length - 1);
   const rawScore = Number(scoreRes.score ?? 0);
-  const pointerPercent =
-    rawScore > 1
-      ? Math.min(100, Math.max(0, (rawScore / maxLevelIndex) * 100))
-      : Math.min(100, Math.max(0, rawScore * 100));
+  const isIndexScale =
+    scoreRes.scoreScale === 'index' ||
+    (scoreRes.scoreScale !== 'unit' && rawScore > 1);
+  const pointerPercent = isIndexScale
+    ? Math.min(100, Math.max(0, (rawScore / maxLevelIndex) * 100))
+    : Math.min(100, Math.max(0, rawScore * 100));
 
   return (
     <div className="space-y-4">
@@ -778,7 +780,9 @@ function SingleQuestionDiagnostic({
             {rawScore.toFixed(3)}
           </span>
           <span className="font-mono text-xs text-zinc-400">
-            (Scale: 0.000 ~ 1.000 · {levels.length} 級)
+            {scoreRes.scoreScale === 'index'
+              ? `(Scale: 0 ~ ${maxLevelIndex} 等級索引 · ${levels.length} 級)`
+              : `(Scale: 0.000 ~ 1.000 · ${levels.length} 級)`}
           </span>
         </div>
 

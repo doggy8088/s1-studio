@@ -1,4 +1,9 @@
 import { EndpointProfile, S1PresetDefinition } from '@/types/systemone';
+import {
+  GEMINI_API_BASE_URL,
+  GEMINI_DECISIONS_MODEL,
+  GEMINI_DECISIONS_PROFILE_ID,
+} from './gemini-decisions';
 
 export const DEFAULT_PROFILES: EndpointProfile[] = [
   {
@@ -34,6 +39,14 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     apiKey: '',
     defaultModel: '@cf/cloudflare/clef',
     useProxy: true,
+  },
+  {
+    id: GEMINI_DECISIONS_PROFILE_ID,
+    name: 'Gemini Decisions API',
+    baseUrl: GEMINI_API_BASE_URL,
+    apiKey: '',
+    defaultModel: GEMINI_DECISIONS_MODEL,
+    useProxy: false,
   },
   {
     id: 's1-builtin-simulator',
@@ -75,6 +88,11 @@ export const BASE_URL_TEMPLATES = [
     label: 'Cloudflare Workers AI',
     url: 'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
     defaultModel: '@cf/cloudflare/clef',
+  },
+  {
+    label: 'Gemini Decisions API',
+    url: GEMINI_API_BASE_URL,
+    defaultModel: GEMINI_DECISIONS_MODEL,
   },
   {
     label: '內建模擬器 (Demo)',

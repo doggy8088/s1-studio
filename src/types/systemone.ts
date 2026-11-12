@@ -48,6 +48,11 @@ export interface ScoreResult {
   confidence: number;
   legend?: Record<string, string>;
   probabilities?: number[] | Record<string, number>;
+  /**
+   * How to read `score`: 'unit' = 0.0 ~ 1.0, 'index' = probability-weighted level index
+   * (0 ~ levels-1, e.g. Gemini Decisions API). Undefined keeps the legacy auto-detection.
+   */
+  scoreScale?: 'unit' | 'index';
 }
 
 export type S1AnswerItem = NoulResult | ChoiceResult | ScoreResult;
@@ -63,6 +68,7 @@ export interface S1ResponsePayload {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
+    total_tokens?: number;
   };
 }
 

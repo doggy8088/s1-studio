@@ -1,4 +1,4 @@
-.PHONY: help install dev build cf-build cf-deploy start lint typecheck check bump-patch clean
+.PHONY: help install dev build cf-build cf-deploy start lint typecheck test check bump-patch clean
 
 PORT ?= 3000
 CF_PROJECT ?= s1-studio
@@ -29,10 +29,14 @@ start: ## Start Next.js production server (default PORT=3000)
 lint: ## Run ESLint code quality checks
 	bun run lint
 
-typecheck: ## Run TypeScript compiler type check (noEmit)
+typecheck: ## Run TypeScript compiler type check (noEmit) for app and tests
 	bun x tsc --noEmit
+	bun x tsc --noEmit -p tests/tsconfig.json
 
-check: typecheck lint build ## Run full verification pipeline (typecheck + lint + build)
+test: ## Run unit + regression tests (live Gemini tests run only when GEMINI_API_KEY is set)
+	bun test
+
+check: typecheck lint test build ## Run full verification pipeline (typecheck + lint + test + build)
 
 bump-patch: ## Bump package.json patch version (required on every AI agent code edit)
 	node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));const v=p.version.split(".").map(Number);v[2]=(v[2]||0)+1;p.version=v.join(".");fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");console.log("Bumped version to",p.version);'

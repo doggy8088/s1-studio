@@ -1,6 +1,6 @@
 # S1 Studio (`s1-studio`)
 
-**S1 Studio** 是一個開源、不綁定單一廠商（Vendor-neutral）的 Web UI 結構化決策與評估工作台，專為相容於 `/v1/systemone` 協定的結構化決策模型（如 **Cloudflare Workers AI `@cf/cloudflare/clef`**、**Ollama Cloud `clef:27b`**、**Local Ollama `clef`**、**TypeSafe AI `jev-latest`** 及自建端點）打造。
+**S1 Studio** 是一個開源、不綁定單一廠商（Vendor-neutral）的 Web UI 結構化決策與評估工作台，專為相容於 `/v1/systemone` 協定的結構化決策模型（如 **Cloudflare Workers AI `@cf/cloudflare/clef`**、**Ollama Cloud `clef:27b`**、**Local Ollama `clef`**、**TypeSafe AI `jev-latest`** 及自建端點）打造，並支援 **Google Gemini Decisions API `gemini-decision-1`**。
 
 - 🌐 **線上使用 (Live Workbench)**：[https://s1-studio.miniasp.com/](https://s1-studio.miniasp.com/)
 - 📦 **GitHub Repository**：[https://github.com/doggy8088/s1-studio](https://github.com/doggy8088/s1-studio)
@@ -10,12 +10,13 @@
 ## ✨ 核心功能亮點
 
 ### 1. 端點與連線設定檔管理 (Endpoint Profiles & CORS Proxy)
-- 內建五組標準端點範本（支援保留金鑰與 Account ID 的一鍵重置）：
+- 內建六組標準端點範本（支援保留金鑰與 Account ID 的一鍵重置）：
   - **Built-in Sandbox Simulator (No Setup)**：`/api/mock-systemone`（免外部連線與金鑰即可完整體驗機率分佈與兩極化警示）
   - **Cloudflare Workers AI (`@cf/cloudflare/clef`)**：自動依據 `CLOUDFLARE_ACCOUNT_ID` 與所選模型（`@cf/cloudflare/clef`、`@cf/cloudflare/clef-omni`、`@cf/cloudflare/clef-flash`）組合 v4 REST 端點網址
   - **Ollama Cloud (`clef:27b`)**：`https://ollama.com`（預設模型 `clef:27b`，支援從 `/models` 動態探索與本機快取）
   - **Local Ollama (`clef`)**：`http://localhost:11434`（預設採用 Direct Mode 瀏覽器直連、不快取模型清單；內建三態連線診斷：未啟動 / CORS 阻擋 / 尚未下載模型，並提供一鍵透過 HTTP `POST /api/pull` 拉取 `clef` 模型）
   - **TypeSafe AI (`jev`)**：`https://api.typesafe.ai`（預設模型 `jev-latest`）
+  - **Gemini Decisions API (`gemini-decision-1`)**：`https://generativelanguage.googleapis.com`（自動呼叫 `POST /v1beta/decisions`，以 `x-goog-api-key` 驗證；詳見下方「Gemini Decisions API 支援」）
 - **雙發送模式（Direct Mode / Proxy Mode）**：
   - **Direct Mode**：由瀏覽器直接發送 `fetch` 請求（適合測試本機已設定 `OLLAMA_ORIGINS` 的 Local Ollama）。
   - **Proxy Mode**：透過內建無狀態 `/api/proxy`（本機為 Next.js API Route，部署至 Cloudflare Pages 時自動轉換為 Cloudflare Edge Worker `functions/api/proxy.ts`）轉發請求，解決雲端 API CORS 阻擋問題，且不留存任何 Payload 與金鑰。
@@ -29,7 +30,7 @@
 | --- | --- | --- |
 | `profile` | 匯入 Profile 時必填 | Profile 名稱。以名稱比對（先比對完全相同，再忽略大小寫與前後空白）。只傳 `profile` 時，若名稱存在會直接切換。 |
 | `baseUrl` | 新增 Profile 時必填 | 端點根網址，例如 `https://api.example.com`；僅接受 `http(s)` 或站內 `/api/...` 路徑。不可包含帳號密碼、查詢字串或 `#` 片段。 |
-| `model` | 否 | 預設模型，例如 `clef`、`clef:27b`、`jev-latest`。未指定時新 Profile 會依端點推斷（Ollama Cloud `clef:27b`、TypeSafe AI `jev-latest`、內建模擬器 `clef-simulator-1.0`、Cloudflare 使用其預設模型，其餘 `clef`），既有 Profile 保留原值。 |
+| `model` | 否 | 預設模型，例如 `clef`、`clef:27b`、`jev-latest`。未指定時新 Profile 會依端點推斷（Ollama Cloud `clef:27b`、TypeSafe AI `jev-latest`、內建模擬器 `clef-simulator-1.0`、Gemini `gemini-decision-1`、Cloudflare 使用其預設模型，其餘 `clef`），既有 Profile 保留原值。 |
 | `proxy` | 否 | `1`/`0`、`true`/`false`、`on`/`off`、`yes`/`no`。未指定時，`localhost`、私有 IP 與 `/api/...` 預設 Direct Mode，其餘預設 Proxy Mode。 |
 | `accountId` | 否 | Cloudflare Workers AI 的 Account ID。未指定時會嘗試從 `baseUrl` 解析。 |
 | `preset` | 否 | 內建或自訂場景範本的完整名稱或 ID。載入後可直接按「執行評估」。 |
@@ -106,6 +107,36 @@ https://s1-studio.miniasp.com/?preset=preset-prompt-injection
 
 ---
 
+## 🔷 Gemini Decisions API 支援
+
+S1 Studio 可直接呼叫 Google AI Studio 的 [Gemini Decisions API](https://aistudio.google.com/docs/decisions-api)。編輯器、場景範本與歷史紀錄仍沿用 SystemOne 格式，送出請求時才轉換為 Gemini 格式，因此同一份問題可在 A/B 對比模式下同時比較 Gemini 與其他端點。
+
+**設定步驟**：
+
+1. 到 [Google AI Studio](https://aistudio.google.com/apikey) 建立 API Key。
+2. 開啟「端點與金鑰設定」，選擇內建的 **Gemini Decisions API** Profile，填入 API Key（只會存在本機瀏覽器 LocalStorage）。
+3. 模型固定為 `gemini-decision-1`。預設使用 Direct Mode，由瀏覽器直接連線（Gemini API 允許跨域請求）；也可以切換為 Proxy Mode。
+
+**格式轉換對照**：
+
+| S1 Studio（SystemOne） | Gemini Decisions API |
+| --- | --- |
+| `POST {baseUrl}/v1/systemone`、`Authorization: Bearer` | `POST /v1beta/decisions`、`x-goog-api-key` |
+| `state`（文字或 JSON） | `input`（JSON 會序列化為文字） |
+| `images`（base64） | `input` 內容區塊陣列：`{"type": "image", "data", "mime_type"}`，MIME 由檔頭自動判斷 |
+| noul `criteria.true` / `criteria.false` | `criteria.true_description` / `criteria.false_description` |
+| choice 選項描述 `null` | 空字串 `""` |
+| 回應 `usage.input_tokens` | 由 `usage.total_input_tokens` 對應 |
+
+**注意事項**：
+
+- **Question Key**：Gemini 只接受英數、`_` 與 `-`，長度 1 到 64 字元，不可含 `.`。不符合時會在送出前直接提示，不會發出請求。
+- **Choice 同分判定**：Gemini 會先將選項 Key 依字母（UTF-8 位元組）排序再評估，完全同分時取字母序最前面的 Key，與編輯器「排在前面的選項優先」的規則不同。
+- **Score 分數**：Gemini 回傳的 `score` 是依機率加權的等級索引（範圍 0 到「等級數 − 1」），不是 0 到 1 的比例，結果卡片的指標位置已依此換算。
+- **程式碼匯出**：cURL 與 fetch 範例使用 `x-goog-api-key: $GEMINI_API_KEY`；Python 範例使用 `google-genai`（3.2 以上）的 `client.decisions.create`，TypeScript SDK 範例使用 `@google/genai` 的 `ai.decisions.create`。
+
+---
+
 ## 💻 本機 Ollama (`localhost:11434`) 跨域設定指南
 
 當您在雲端網頁（`https://s1-studio.miniasp.com`）直接連線至自己電腦上的 `http://localhost:11434` 時，必須讓本機 Ollama 允許瀏覽器 `Origin` 跨域存取：
@@ -136,7 +167,13 @@ make install
 # 啟動開發伺服器 (http://localhost:3000)
 make dev
 
-# 執行完整檢查 (TypeScript + ESLint + Next.js Build)
+# 執行單元與回歸測試 (bun test)
+make test
+
+# 設定 GEMINI_API_KEY 時，會一併執行呼叫真實 Gemini Decisions API 的整合測試
+GEMINI_API_KEY=... make test
+
+# 執行完整檢查 (TypeScript + ESLint + 測試 + Next.js Build)
 make check
 
 # 建置 Cloudflare Pages 靜態匯出 (out/)
@@ -148,12 +185,26 @@ make cf-build
 ## ☁️ 部署至 Cloudflare Pages（含 Edge Proxy API）
 
 本專案已完整配置 **Cloudflare Pages 靜態匯出 (`out/`) + Cloudflare Pages Functions (`functions/api/*`)**：
-- `functions/api/proxy.ts` 會自動部署為 Cloudflare Edge Worker `/api/proxy`，負責無狀態代理轉發雲端 `/v1/systemone` 請求。
+
+- `functions/api/proxy.ts` 會自動部署為 Cloudflare Edge Worker `/api/proxy`，負責無狀態代理轉發雲端 `/v1/systemone` 與 Gemini `/v1beta/decisions` 請求。
 - `functions/api/mock-systemone/v1/systemone.ts` 會自動部署為 `/api/mock-systemone/v1/systemone` 內建沙盒模擬端點。
 
 ```bash
 make cf-deploy
 ```
+
+### CI/CD（GitHub Actions）
+
+`.github/workflows/deploy-cloudflare-pages.yml` 會在 push 到 `main`、對 `main` 發 Pull Request 或手動觸發時執行：
+
+1. 安裝依賴（`bun install --frozen-lockfile`）
+2. 型別檢查（`make typecheck`）
+3. 程式碼檢查（`make lint`）
+4. 單元與回歸測試（`make test`）
+5. 建置 Cloudflare Pages 靜態匯出（`make cf-build`）
+6. 部署至 Cloudflare Pages（需要 `CLOUDFLARE_API_TOKEN` 與 `CLOUDFLARE_ACCOUNT_ID` 兩個 Secret）
+
+任一步驟失敗就不會部署。若在 Repository Secrets 設定 `GEMINI_API_KEY`，CI 也會執行 Gemini Decisions API 的真實整合測試；未設定時這些測試會自動略過。
 
 ---
 

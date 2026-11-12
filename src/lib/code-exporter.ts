@@ -7,6 +7,12 @@ import {
   isCloudflareProfile,
   stripLocalOllamaStatusSuffix,
 } from './s1-utils';
+import {
+  GEMINI_API_KEY_ENV_VAR,
+  buildGeminiDecisionsEndpoint,
+  isGeminiDecisionsProfile,
+  toGeminiDecisionsRequest,
+} from './gemini-decisions';
 
 export interface CodeGenOptions {
   includeRawApiKey: boolean;
@@ -28,6 +34,9 @@ export function getProfileApiKeyEnvVar(profile: EndpointProfile): string {
 
   if (name.includes('llmshare') || url.includes('llmshare')) {
     return 'LLMSHARE_API_KEY';
+  }
+  if (isGeminiDecisionsProfile(profile)) {
+    return GEMINI_API_KEY_ENV_VAR;
   }
   if (
     id.includes('cloudflare') ||
@@ -106,6 +115,9 @@ export function generateCurlSnippet(
   payload: S1RequestPayload,
   options: CodeGenOptions
 ): string {
+  if (isGeminiDecisionsProfile(profile)) {
+    return generateGeminiCurlSnippet(profile, payload, options);
+  }
   const modelToUse = payload.model || profile.defaultModel;
   const endpoint = isCloudflareProfile(profile)
     ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
@@ -137,6 +149,9 @@ export function generatePythonSnippet(
   payload: S1RequestPayload,
   options: CodeGenOptions
 ): string {
+  if (isGeminiDecisionsProfile(profile)) {
+    return generateGeminiPythonSnippet(profile, payload, options);
+  }
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const resolvedBaseUrl = baseUrlClean.startsWith('/')
     ? `http://localhost:3000${baseUrlClean}`
@@ -201,6 +216,9 @@ export function generateTypeScriptSnippet(
   options: CodeGenOptions,
   variant: 'sdk' | 'fetch' = 'sdk'
 ): string {
+  if (isGeminiDecisionsProfile(profile)) {
+    return generateGeminiTypeScriptSnippet(profile, payload, options, variant);
+  }
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const resolvedBaseUrl = baseUrlClean.startsWith('/')
     ? `http://localhost:3000${baseUrlClean}`
@@ -267,5 +285,163 @@ async function evaluateSystemOne() {
 }
 
 evaluateSystemOne().catch(console.error);
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Gemini Decisions API snippets (POST /v1beta/decisions, x-goog-api-key)
+// ---------------------------------------------------------------------------
+
+function geminiApiKeyLiteral(
+  profile: EndpointProfile,
+  options: CodeGenOptions
+): string | undefined {
+  const raw = (profile.apiKey || '').trim();
+  return options.includeRawApiKey && raw ? raw : undefined;
+}
+
+function generateGeminiCurlSnippet(
+  profile: EndpointProfile,
+  payload: S1RequestPayload,
+  options: CodeGenOptions
+): string {
+  const endpoint = buildGeminiDecisionsEndpoint(profile.baseUrl);
+  const body = toGeminiDecisionsRequest(
+    payload,
+    payload.model || profile.defaultModel
+  );
+  const escapedBody = JSON.stringify(body, null, 2).replace(/'/g, `'\\''`);
+  const rawKey = geminiApiKeyLiteral(profile, options);
+  const keyValue = rawKey ?? `$${GEMINI_API_KEY_ENV_VAR}`;
+
+  return `curl -s -X POST "${endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "x-goog-api-key: ${keyValue}" \\
+  -d '${escapedBody}' | jq`;
+}
+
+function toPythonLiteral(value: unknown): string {
+  return JSON.stringify(value, null, 4)
+    .replace(/\btrue\b/g, 'True')
+    .replace(/\bfalse\b/g, 'False')
+    .replace(/\bnull\b/g, 'None');
+}
+
+function generateGeminiPythonSnippet(
+  profile: EndpointProfile,
+  payload: S1RequestPayload,
+  options: CodeGenOptions
+): string {
+  const body = toGeminiDecisionsRequest(
+    payload,
+    payload.model || profile.defaultModel
+  );
+  const rawKey = geminiApiKeyLiteral(profile, options);
+  const clientArgs = rawKey
+    ? `api_key="${rawKey}", http_options={"api_version": "v1beta"}`
+    : `http_options={"api_version": "v1beta"}`;
+
+  const checks: string[] = [];
+  for (const [key, q] of Object.entries(payload.questions)) {
+    const ref = `result.answers[${JSON.stringify(key)}]`;
+    if (q.type === 'noul') {
+      const th = (options.noulThresholds?.[key] ?? 0.5).toFixed(2);
+      checks.push(
+        `print(f"[NOUL] ${key}: {${ref}.noul:.3f} -> {'PASS' if ${ref}.noul >= ${th} else 'REJECT'} (threshold=${th})")`
+      );
+    } else if (q.type === 'choice') {
+      checks.push(
+        `print(f"[CHOICE] ${key}: winner={${ref}.choice} (confidence={${ref}.confidence:.3f})")`
+      );
+    } else {
+      checks.push(
+        `print(f"[SCORE] ${key}: score={${ref}.score:.3f} (confidence={${ref}.confidence:.3f})")`
+      );
+    }
+  }
+
+  const envNote = rawKey
+    ? ''
+    : `# 預設讀取環境變數 ${GEMINI_API_KEY_ENV_VAR}\n`;
+
+  return `# pip install -U "google-genai>=3.2"
+${envNote}from google import genai
+
+client = genai.Client(${clientArgs})
+
+request_payload = ${toPythonLiteral(body)}
+
+result = client.decisions.create(
+    model=request_payload["model"],
+    input=request_payload["input"],
+    questions=request_payload["questions"],
+)
+
+${checks.length > 0 ? checks.join('\n') : 'print(result)'}
+`;
+}
+
+function generateGeminiTypeScriptSnippet(
+  profile: EndpointProfile,
+  payload: S1RequestPayload,
+  options: CodeGenOptions,
+  variant: 'sdk' | 'fetch'
+): string {
+  const body = toGeminiDecisionsRequest(
+    payload,
+    payload.model || profile.defaultModel
+  );
+  const payloadStr = JSON.stringify(body, null, 2);
+  const rawKey = geminiApiKeyLiteral(profile, options);
+  const apiKeyExpr = rawKey
+    ? `"${rawKey}"`
+    : `process.env.${GEMINI_API_KEY_ENV_VAR} ?? ""`;
+
+  if (variant === 'sdk') {
+    return `// npm install @google/genai@latest
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: ${apiKeyExpr},
+  apiVersion: "v1beta",
+});
+
+async function runDecision() {
+  const result = await ai.decisions.create(${payloadStr});
+
+  console.log("Gemini Decisions Response:", JSON.stringify(result, null, 2));
+  return result;
+}
+
+runDecision().catch(console.error);
+`;
+  }
+
+  const endpoint = buildGeminiDecisionsEndpoint(profile.baseUrl);
+  return `const ENDPOINT = "${endpoint}";
+const API_KEY = ${apiKeyExpr};
+
+async function evaluateGeminiDecision() {
+  const payload = ${payloadStr};
+
+  const response = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": API_KEY,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(\`HTTP \${response.status}: \${await response.text()}\`);
+  }
+
+  const data = await response.json();
+  console.log("Gemini Decisions Result:", data);
+  return data;
+}
+
+evaluateGeminiDecision().catch(console.error);
 `;
 }

@@ -10,6 +10,10 @@ import {
 } from '@/lib/presets';
 import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
+  buildGeminiDecisionsEndpoint,
+  isGeminiDecisionsProfile,
+} from '@/lib/gemini-decisions';
+import {
   LocalOllamaDiagnosis,
   buildCloudflareEndpointUrl,
   copyTextToClipboard,
@@ -107,10 +111,11 @@ export function ProfileManagerModal({
   const isBuiltInProfile = BUILT_IN_PROFILE_IDS.has(currentProfile.id);
   const isCf = isCloudflareProfile(currentProfile);
   const isLocalOllama = isLocalOllamaProfile(currentProfile);
+  const isGemini = isGeminiDecisionsProfile(currentProfile);
   const cfAccountId = isCf ? extractCloudflareAccountId(currentProfile) : '';
 
   const canFetchRemoteModels = useMemo(() => {
-    if (isCf) return false;
+    if (isCf || isGemini) return false;
     const url = currentProfile.baseUrl.trim();
     if (!url || url.startsWith('/api/')) return false;
     const isLocalhost =
@@ -119,7 +124,7 @@ export function ProfileManagerModal({
       currentProfile.apiKey && currentProfile.apiKey.trim().length > 0
     );
     return isLocalhost || hasKey;
-  }, [isCf, currentProfile.baseUrl, currentProfile.apiKey]);
+  }, [isCf, isGemini, currentProfile.baseUrl, currentProfile.apiKey]);
 
   const loadModels = useCallback(
     async (profileToFetch: EndpointProfile, forceRefresh = false) => {
@@ -521,7 +526,9 @@ export function ProfileManagerModal({
                     Base URL 端點根網址
                   </label>
                   <span className="font-mono text-xs text-zinc-400">
-                    自動附加 /v1/systemone
+                    {isGemini
+                      ? '自動附加 /v1beta/decisions'
+                      : '自動附加 /v1/systemone'}
                   </span>
                 </div>
                 <input
@@ -533,6 +540,26 @@ export function ProfileManagerModal({
                   placeholder="http://localhost:11434"
                   className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
+                {isGemini && (
+                  <div className="mt-2 rounded-lg border border-[#232732] bg-[#090a0d] px-3 py-2 font-mono text-xs break-all text-zinc-400">
+                    <span className="text-zinc-500">實際呼叫端點：</span>{' '}
+                    <span className="text-amber-300/90">
+                      {buildGeminiDecisionsEndpoint(currentProfile.baseUrl)}
+                    </span>
+                    <div className="mt-1 font-sans text-zinc-500">
+                      以 x-goog-api-key 標頭驗證；API Key 可於{' '}
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-300 underline underline-offset-2 hover:text-sky-200"
+                      >
+                        Google AI Studio
+                      </a>{' '}
+                      取得。
+                    </div>
+                  </div>
+                )}
 
                 {/* Quick Templates: ONLY shown for non-built-in custom profiles */}
                 {!isBuiltInProfile && (
@@ -576,7 +603,7 @@ export function ProfileManagerModal({
                   onChange={(e) =>
                     handleUpdateCurrent({ apiKey: e.target.value })
                   }
-                  placeholder={`sk-... 或留空（複製 cURL 時預設使用 $${getProfileApiKeyEnvVar(currentProfile)}）`}
+                  placeholder={`${isGemini ? 'AIza...' : 'sk-...'} 或留空（複製 cURL 時預設使用 $${getProfileApiKeyEnvVar(currentProfile)}）`}
                   className="w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] py-2.5 pr-10 pl-3.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
                 <button

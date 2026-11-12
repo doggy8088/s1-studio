@@ -28,6 +28,33 @@ function extractClefAndJevModels(payload: unknown): string[] {
   return Array.from(new Set(matched));
 }
 
+// Keep these Gemini helpers identical to functions/api/proxy.ts
+const GEMINI_API_HOST = 'generativelanguage.googleapis.com';
+const GEMINI_DECISIONS_ENDPOINT = `https://${GEMINI_API_HOST}/v1beta/decisions`;
+
+function isGeminiApiHost(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === GEMINI_API_HOST;
+  } catch {
+    return false;
+  }
+}
+
+function resolveGeminiDecisionsEndpoint(cleanedBase: string): string {
+  if (/\/v1beta\/decisions$/i.test(cleanedBase)) return cleanedBase;
+  if (/\/v1beta$/i.test(cleanedBase)) return `${cleanedBase}/decisions`;
+  return GEMINI_DECISIONS_ENDPOINT;
+}
+
+function extractGeminiApiKey(
+  authHeader: string | null,
+  googApiKeyHeader: string | null
+): string {
+  const direct = (googApiKeyHeader || '').trim();
+  if (direct) return direct;
+  return (authHeader || '').replace(/^Bearer\s+/i, '').trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const targetBaseUrl = req.headers.get('x-s1-target-url');
@@ -123,9 +150,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ endpoint)
-    const targetEndpoint =
-      cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
+    // Gemini Decisions API: POST /v1beta/decisions with x-goog-api-key auth
+    const isGeminiTarget = isGeminiApiHost(cleanedBase);
+
+    // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ or Gemini endpoint)
+    const targetEndpoint = isGeminiTarget
+      ? resolveGeminiDecisionsEndpoint(cleanedBase)
+      : cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
         ? cleanedBase
         : `${cleanedBase}/v1/systemone`;
 
@@ -153,7 +184,15 @@ export async function POST(req: NextRequest) {
       Accept: 'application/json',
     };
 
-    if (authHeader && authHeader.trim().length > 0) {
+    if (isGeminiTarget) {
+      const geminiKey = extractGeminiApiKey(
+        authHeader,
+        req.headers.get('x-goog-api-key')
+      );
+      if (geminiKey) {
+        forwardHeaders['x-goog-api-key'] = geminiKey;
+      }
+    } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
     }
 

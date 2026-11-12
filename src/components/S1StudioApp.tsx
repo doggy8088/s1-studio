@@ -55,6 +55,7 @@ import {
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
+import { isGeminiDecisionsProfile } from '@/lib/gemini-decisions';
 import {
   generateCurlSnippet,
   getProfileApiKeyEnvVar,
@@ -604,7 +605,8 @@ export function S1StudioApp() {
     if (
       !url ||
       url.startsWith('/api/') ||
-      isCloudflareProfile(activeProfile)
+      isCloudflareProfile(activeProfile) ||
+      isGeminiDecisionsProfile(activeProfile)
     ) {
       return;
     }
@@ -1684,9 +1686,18 @@ export function S1StudioApp() {
               >
                 TypeSafe AI
               </a>
+              <span>·</span>
+              <a
+                href="https://aistudio.google.com/docs/decisions-api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 underline underline-offset-4 transition hover:text-amber-300"
+              >
+                Gemini Decisions API
+              </a>
             </div>
             <span className="text-zinc-400">
-              All third-party trademarks (Ollama, Cloudflare, TypeSafe AI) belong
+              All third-party trademarks (Ollama, Cloudflare, TypeSafe AI, Google Gemini) belong
               to their respective owners.
             </span>
           </div>
