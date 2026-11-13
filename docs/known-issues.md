@@ -13,7 +13,7 @@
 | [score 刻度判斷錯誤](#score-刻度判斷錯誤) | Ollama、Cloudflare、TypeSafe AI | 中 | v0.1.20 已修正 |
 | [TypeSafe AI SDK 名稱錯誤](#typesafe-ai-sdk-名稱錯誤) | TypeSafe AI 與所有使用 SDK 範例的非 Gemini 提供者 | 中 | v0.1.20 已修正 |
 | [TypeSafe AI 圖片格式不符](#typesafe-ai-圖片格式不符) | TypeSafe AI | 低 | v0.1.20 已修正 |
-| [Ollama 與 Cloudflare 的 score 等級上限未檢查](#ollama-與-cloudflare-的-score-等級上限未檢查) | Ollama、Cloudflare | 低 | v0.1.20 已修正 |
+| [Ollama 與 Cloudflare 的 score 等級上限未檢查](#ollama-與-cloudflare-的-score-等級上限未檢查) | Ollama、Cloudflare、TypeSafe AI | 低 | v0.1.20 已修正 |
 
 ## score 刻度判斷錯誤
 
@@ -21,7 +21,7 @@
 
 **修正方式**：
 
-- `executeSystemOneRequest()` 對所有非模擬器的提供者呼叫 `normalizeS1ResponsePayload(…, { scoreScale: 'index' })`；內建模擬器（`id` 為 `s1-builtin-simulator` 或網址以 `/api/` 開頭）標為 `'unit'`。
+- `executeSystemOneRequest()` 對所有非模擬器的提供者呼叫 `normalizeS1ResponsePayload(…, { scoreScale: 'index' })`；內建模擬器（`id` 為 `s1-builtin-simulator`、網址以 `/api/` 開頭，或網址路徑含 `/api/mock-systemone`）標為 `'unit'`。
 - 結果卡片的刻度標籤改用與指標位置相同的判斷，兩者不會再不一致。
 - `normalizeS1ResponsePayload()` 本身不變，沒有 `scoreScale` 的舊歷史紀錄仍沿用舊的推測規則。
 
@@ -79,7 +79,7 @@
    - JSON 物件 State：加上 `images` 欄位（已存在時改用 `images_2`、`images_3`…）。
    - 其他 JSON 值：包成 `{"state": 原值, "images": [...]}`。
 4. 只有帶圖片的請求才加上 `TypeSafe-Danger-Zone-Images: true` 標頭；兩種 `/api/proxy` 實作都會轉送此標頭，Cloudflare 版本的 `Access-Control-Allow-Headers` 也已加入。
-5. TypeSafe 只接受 PNG 與 JPEG，S1 Studio 卻允許上傳 WebP。送出前會先檢查，遇到其他格式直接顯示正體中文錯誤，不會送出請求。
+5. TypeSafe 只接受 PNG 與 JPEG，S1 Studio 卻允許上傳 WebP。送出前會先檢查，遇到其他格式直接顯示正體中文錯誤，不會送出請求；匯出的範例程式碼則在開頭加上同樣的警告註解。
 6. 匯出的 cURL、`fetch` 與 SDK 範例使用相同的 `assets` 格式與標頭。
 
 沒有圖片的請求完全不受影響，本文與標頭都與修正前相同。
@@ -95,6 +95,8 @@
 
 **原本的現象**：Ollama 與 Cloudflare 的 `score` 只接受 2 到 10 個等級，但 [`validateQuestionsBuilder()`](../src/lib/s1-utils.ts) 只檢查至少 2 個，沒有上限，超過時要等 API 回傳錯誤。
 
+複查時發現 TypeSafe AI 也有相同限制（「Should have at least two levels; the API accepts up to 10.」），v0.1.19 的文件誤記為「未明訂」，一併修正。
+
 **修正方式**：新增 `getScoreLevelLimitForProfile()`，依目前的 Profile 回傳官方上限，`validateQuestionsBuilder()` 多了選填的 `scoreLevelLimit` 參數，編輯器會即時顯示錯誤並停用執行：
 
 | 提供者 | 上限 | 判斷方式 |
@@ -102,14 +104,18 @@
 | Ollama（本機與雲端） | 10 | `isLocalOllamaProfile()`，或主機名稱為 `ollama.com` |
 | Cloudflare Workers AI | 10 | `isCloudflareProfile()` |
 | Gemini Decisions API | 255 | `isGeminiDecisionsProfile()` |
-| TypeSafe AI、內建模擬器、自訂端點 | 不限制 | 官方未明訂 |
+| TypeSafe AI | 10 | `isTypeSafeProfile()` |
+| 內建模擬器、自訂端點 | 不限制 | 沒有已知上限 |
 
-**驗證**：[`tests/typesafe.test.ts`](../tests/typesafe.test.ts) 的「score level limits per provider」確認各 Profile 的上限，以及 10 個等級通過、11 個等級在 Ollama 下產生錯誤、未傳入上限時行為與修正前相同。
+計算的是實際送出的等級數。空白的等級列也會被送出，所以同樣計入上限。
+
+**驗證**：[`tests/typesafe.test.ts`](../tests/typesafe.test.ts) 的「score level limits per provider」確認各 Profile 的上限、10 個等級通過、11 個等級在 Ollama 下產生錯誤、空白等級列計入上限，以及未傳入上限時行為與修正前相同。
 
 **官方依據**：
 
 - [Ollama SystemOne API](https://docs.ollama.com/api/systemone)
 - [Cloudflare `@cf/cloudflare/clef` 輸入 schema](https://developers.cloudflare.com/workers-ai/models/clef/)
+- [TypeSafe AI：Score](https://docs.typesafe.ai/primitives/score)
 - [Gemini Decisions API](https://aistudio.google.com/docs/decisions-api)
 
 ## 尚存的限制
@@ -118,6 +124,7 @@
 - **TypeSafe 圖片尺寸**：TypeSafe 要求每邊 280 到 1,568 畫素、總畫素 78,400 到 2,458,624。S1 Studio 只檢查格式，尺寸不符時由 API 回傳 400。
 - **TypeSafe 圖片傳輸方式**：S1 Studio 以 JSON 內嵌 base64 傳送；官方建議 multipart，但 JSON 方式同樣受支援，只是本文約大三分之一。
 - **自架 Ollama 的等級上限**：只能辨識內建的 Local Ollama Profile、`localhost:11434` 與 `ollama.com`。Ollama 架在其他主機時，不會套用 10 個等級的上限。
+- **TypeSafe 的陣列或純量 State**：附加圖片時，非物件的 JSON State 會被包成 `{"state": 原值, "images": [...]}`，以反引號引用陣列路徑（例如 `` `[0].content` ``）的問題需改寫為 `` `state[0].content` ``。
 - **A/B 對比**：等級上限依「目前使用的 Profile」檢查。對比用的 Profile 上限較低時，仍由該 API 回傳錯誤。
 
 ## 待確認事項

@@ -197,6 +197,15 @@ describe('regression: existing providers are unchanged', () => {
     });
   }
 
+  test('custom profile pointing at the simulator by absolute URL is unit scale', async () => {
+    nextResponse = scoreAnswer;
+    const run = await executeSystemOneRequest(
+      { ...profile('s1-builtin-simulator'), id: 'custom-sim', baseUrl: 'http://localhost:3000/api/mock-systemone' },
+      scorePayload
+    );
+    expect(run.response?.scores?.s.scoreScale).toBe('unit');
+  });
+
   test('built-in simulator keeps its 0-1 score (scoreScale=unit)', async () => {
     nextResponse = scoreAnswer;
     const run = await executeSystemOneRequest(profile('s1-builtin-simulator'), scorePayload);
@@ -369,6 +378,17 @@ describe('code exporter: TypeSafe AI official SDKs', () => {
     expect(curl).not.toContain('"images"');
     const fetchCode = generateTypeScriptSnippet(ts, withImg, opts, 'fetch');
     expect(fetchCode).toContain('"TypeSafe-Danger-Zone-Images": "true",');
+  });
+
+  test('WebP images: snippets carry a warning; empty images never leak into the SDK call', () => {
+    const webp = { ...tsPayload, images: ['UklGRiQAAABXRUJQ'] };
+    expect(generateCurlSnippet(ts, webp, opts)).toStartWith('# 注意：TypeSafe AI 只接受 PNG 或 JPEG');
+    expect(generatePythonSnippet(ts, webp, opts)).toStartWith('# 注意：');
+    expect(generateTypeScriptSnippet(ts, webp, opts, 'sdk')).toStartWith('// 注意：');
+    expect(generateTypeScriptSnippet(ts, webp, opts, 'fetch')).toStartWith('// 注意：');
+    expect(generateCurlSnippet(ts, tsPayload, opts)).toStartWith('curl ');
+    const emptyImages = generateTypeScriptSnippet(ts, { ...tsPayload, images: [] }, opts, 'sdk');
+    expect(emptyImages).not.toContain('"images"');
   });
 
   test('raw key is embedded only when requested', () => {

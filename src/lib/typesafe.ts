@@ -73,7 +73,7 @@ export function validateTypeSafeImages(images?: string[]): string | null {
     .map((img, i) => (detectTypeSafeImageFormat(img) ? null : i + 1))
     .filter((n): n is number => n !== null);
   if (bad.length === 0) return null;
-  return `TypeSafe AI 只接受 PNG 或 JPEG 圖片，第 ${bad.join('、')} 張圖片不是這兩種格式（例如 WebP），請轉檔後再試。`;
+  return `TypeSafe AI 只接受 PNG 或 JPEG 圖片，第 ${bad.join('、')} 張圖片不是這兩種格式（例如 WebP、GIF），請轉檔後再試。`;
 }
 
 function randomId(): string {

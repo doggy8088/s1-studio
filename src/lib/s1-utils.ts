@@ -1049,11 +1049,12 @@ export function isOllamaCloudProfile(
 
 /**
  * Maximum number of `score` levels the provider accepts, when documented:
- * - Ollama (local and cloud) and Cloudflare Workers AI: 10
- *   (https://docs.ollama.com/api/systemone, https://developers.cloudflare.com/workers-ai/models/clef/)
+ * - Ollama (local and cloud), Cloudflare Workers AI and TypeSafe AI: 10
+ *   (https://docs.ollama.com/api/systemone, https://developers.cloudflare.com/workers-ai/models/clef/,
+ *   https://docs.typesafe.ai/primitives/score: "the API accepts up to 10")
  * - Gemini Decisions API: 255 (https://aistudio.google.com/docs/decisions-api)
- * TypeSafe AI, the built-in simulator and custom endpoints have no documented
- * upper limit, so no limit is enforced (`undefined`).
+ * The built-in simulator and custom endpoints have no known upper limit,
+ * so no limit is enforced (`undefined`).
  */
 export function getScoreLevelLimitForProfile(
   profile: Pick<EndpointProfile, 'id' | 'name' | 'baseUrl'>
@@ -1066,6 +1067,9 @@ export function getScoreLevelLimitForProfile(
   }
   if (isLocalOllamaProfile(profile) || isOllamaCloudProfile(profile)) {
     return { providerName: 'Ollama', max: 10 };
+  }
+  if (isTypeSafeProfile(profile)) {
+    return { providerName: 'TypeSafe AI', max: 10 };
   }
   return undefined;
 }
@@ -1161,12 +1165,14 @@ export function validateQuestionsBuilder(
           message: `Score 問題 "${key || '未命名'}" 最少需要 2 個等級 (Levels).`,
         });
       }
+      // Every row is sent as a criterion (blank labels included), so count them all.
+      const sentLevels = item.scoreCriteria.length;
       const limit = options.scoreLevelLimit;
-      if (limit && validLevels.length > limit.max) {
+      if (limit && sentLevels > limit.max) {
         issues.push({
           questionId: item.id,
           field: 'criteria',
-          message: `Score 問題 "${key || '未命名'}" 有 ${validLevels.length} 個等級，${limit.providerName} 最多只接受 ${limit.max} 個等級 (Levels).`,
+          message: `Score 問題 "${key || '未命名'}" 有 ${sentLevels} 個等級，${limit.providerName} 最多只接受 ${limit.max} 個等級 (Levels).`,
         });
       }
     }
@@ -1294,7 +1300,9 @@ export async function executeSystemOneRequest(
   const isInternalMock = baseUrlClean.startsWith('/api/');
   const isTypeSafe = !isCf && isTypeSafeProfile(profile);
   const isBuiltinSimulator =
-    isInternalMock || profile.id === 's1-builtin-simulator';
+    isInternalMock ||
+    profile.id === 's1-builtin-simulator' ||
+    /\/api\/mock-systemone(\/|$)/i.test(baseUrlClean);
 
   if (isTypeSafe) {
     const imageError = validateTypeSafeImages(finalPayload.images);

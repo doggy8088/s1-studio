@@ -20,6 +20,7 @@ import {
   toTypeSafeApiRoot,
   toTypeSafeRequest,
   typeSafeRequestHeaders,
+  validateTypeSafeImages,
 } from './typesafe';
 
 export interface CodeGenOptions {
@@ -126,6 +127,20 @@ function normalizePayloadForProfile(
     : withModel;
 }
 
+/**
+ * TypeSafe accepts PNG/JPEG only. The app blocks other formats before sending;
+ * exported snippets carry the same message as a leading comment instead.
+ */
+function typeSafeImageWarning(
+  profile: EndpointProfile,
+  payload: S1RequestPayload,
+  commentPrefix: '#' | '//'
+): string {
+  if (!isTypeSafeSdkProfile(profile)) return '';
+  const err = validateTypeSafeImages(payload.images);
+  return err ? `${commentPrefix} 注意：${err}\n` : '';
+}
+
 /** Provider-specific request headers besides Content-Type and auth. */
 function extraSnippetHeaders(
   profile: EndpointProfile,
@@ -197,7 +212,7 @@ export function generateCurlSnippet(
     .map(([k, v]) => `  -H "${k}: ${v}" \\\n`)
     .join('');
 
-  return `curl -s -X POST "${endpoint}" \\
+  return `${typeSafeImageWarning(profile, payload, '#')}curl -s -X POST "${endpoint}" \\
   -H "Content-Type: application/json" \\
 ${authHeaderLine}${extraHeaderLines}  -d '${escapedBody}' | jq`;
 }
@@ -216,7 +231,7 @@ export function generatePythonSnippet(
     return generateGeminiPythonSnippet(profile, payload, options);
   }
   if (isTypeSafeSdkProfile(profile)) {
-    return generateTypeSafePythonSnippet(profile, payload, options);
+    return `${typeSafeImageWarning(profile, payload, '#')}${generateTypeSafePythonSnippet(profile, payload, options)}`;
   }
   return generateHttpPythonSnippet(profile, payload, options);
 }
@@ -376,13 +391,14 @@ export function generateTypeScriptSnippet(
   if (isGeminiDecisionsProfile(profile)) {
     return generateGeminiTypeScriptSnippet(profile, payload, options, variant);
   }
+  const warning = typeSafeImageWarning(profile, payload, '//');
   if (variant === 'sdk') {
     if (isTypeSafeSdkProfile(profile)) {
-      return generateTypeSafeTypeScriptSnippet(profile, payload, options);
+      return `${warning}${generateTypeSafeTypeScriptSnippet(profile, payload, options)}`;
     }
     return `// 此端點沒有官方 TypeScript SDK，以下使用原生 fetch。\n${generateFetchTypeScriptSnippet(profile, payload, options)}`;
   }
-  return generateFetchTypeScriptSnippet(profile, payload, options);
+  return `${warning}${generateFetchTypeScriptSnippet(profile, payload, options)}`;
 }
 
 function indentBlock(text: string, spaces: number): string {
@@ -406,8 +422,9 @@ function generateTypeSafeTypeScriptSnippet(
   const assets = Object.entries(body.assets ?? {});
   const hasImages = assets.length > 0;
 
-  const { assets: _assets, ...request } = body;
+  const { assets: _assets, images: _images, ...request } = body;
   void _assets;
+  void _images;
   let requestStr = JSON.stringify(request, null, 2);
   if (hasImages) {
     const assetLines = assets

@@ -45,7 +45,7 @@ S1 Studio 會把舊設定中的 `jev-1.13.0` 自動改為 `jev-latest`（見 [�
 - **題型**：Choice、Score、Noul，以及 jev 1.14 新增的 Box。S1 Studio 目前不支援 Box。
 - **noul**：`criteria` 為 `{true, false}`。
 - **choice**：最多 255 個選項。
-- **score**：回傳等級索引，「For a three-level scale it runs from 0 to 2」；官方建議除以 `len(criteria) - 1` 正規化。
+- **score**：`criteria` 為 2 到 10 個等級（「the API accepts up to 10」）；回傳等級索引，「For a three-level scale it runs from 0 to 2」；官方建議除以 `len(criteria) - 1` 正規化。
 - **回應**：`{model, answers, usage: {input_tokens, output_tokens}}`，score 答案包含 `legend`。
 
 ## 圖片（與其他提供者不同）

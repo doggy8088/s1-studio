@@ -112,7 +112,7 @@ describe('score level limits per provider', () => {
     expect(getScoreLevelLimitForProfile(byId('ollama-cloud-clef'))?.max).toBe(10);
     expect(getScoreLevelLimitForProfile(byId('cloudflare-workers-ai-clef'))?.max).toBe(10);
     expect(getScoreLevelLimitForProfile(byId('gemini-decisions-api'))?.max).toBe(255);
-    expect(getScoreLevelLimitForProfile(byId('typesafe-ai-jev'))).toBeUndefined();
+    expect(getScoreLevelLimitForProfile(byId('typesafe-ai-jev'))?.max).toBe(10);
     expect(getScoreLevelLimitForProfile(byId('s1-builtin-simulator'))).toBeUndefined();
     expect(
       getScoreLevelLimitForProfile({ id: 'c', name: 'custom', baseUrl: 'https://ollama.com' })?.max
@@ -142,8 +142,18 @@ describe('score level limits per provider', () => {
     expect(validateQuestionsBuilder([scoreItem(11)])).toHaveLength(0);
     expect(
       validateQuestionsBuilder([scoreItem(11)], {
-        scoreLevelLimit: getScoreLevelLimitForProfile(byId('typesafe-ai-jev')),
+        scoreLevelLimit: getScoreLevelLimitForProfile(byId('s1-builtin-simulator')),
       })
     ).toHaveLength(0);
+  });
+
+  test('blank level rows count toward the limit because they are sent', () => {
+    const item = scoreItem(11) as unknown as { scoreCriteria: { id: string; label: string }[] };
+    item.scoreCriteria[10].label = '   ';
+    const issues = validateQuestionsBuilder([item as unknown as QuestionBuilderItem], {
+      scoreLevelLimit: getScoreLevelLimitForProfile(byId('cloudflare-workers-ai-clef')),
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('Cloudflare Workers AI 最多只接受 10 個等級');
   });
 });
