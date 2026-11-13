@@ -118,6 +118,10 @@
 - [TypeSafe AI：Score](https://docs.typesafe.ai/primitives/score)
 - [Gemini Decisions API](https://aistudio.google.com/docs/decisions-api)
 
+## v0.1.21 補充修正
+
+**Base URL 以 `/v1` 結尾時重複 `/v1`**：Fable 複查 v0.1.20 時發現，Profile 的 Base URL 若填成 `https://api.typesafe.ai/v1`，S1 Studio 會組出 `https://api.typesafe.ai/v1/v1/systemone`。這個問題早於 v0.1.20，所有 SystemOne 格式的提供者都會遇到。v0.1.21 起，前端直連與兩個 `/api/proxy` 實作都改為：結尾是 `/v1/systemone` 照用，結尾是 `/v1` 只補 `/systemone`，其他才補 `/v1/systemone`。測試見 [`tests/typesafe.test.ts`](../tests/typesafe.test.ts) 與 [`tests/proxy.test.ts`](../tests/proxy.test.ts)。
+
 ## 尚存的限制
 
 - **舊歷史紀錄的 score 刻度**：v0.1.20 以前存下的歷史紀錄沒有 `scoreScale`，仍以「大於 1 視為索引」推測，小於等於 1 的索引值會畫錯位置。重新執行即可得到正確顯示。

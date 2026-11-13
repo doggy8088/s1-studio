@@ -39,7 +39,10 @@
 | --- | --- | --- |
 | 主機為 `generativelanguage.googleapis.com` | 結尾為 `/v1beta/decisions` 時照用；結尾為 `/v1beta` 時加上 `/decisions`；其餘一律改為 `https://generativelanguage.googleapis.com/v1beta/decisions` | `x-goog-api-key`（取自 `x-goog-api-key` 或去掉 `Bearer ` 的 `Authorization`），**不送** `Authorization` |
 | 結尾為 `/v1/systemone` 或含 `/ai/run/` | 照用 | `Authorization` |
+| 結尾為 `/v1` | 在後面加上 `/systemone`（v0.1.21 起，不會再組出 `/v1/v1/systemone`） | `Authorization` |
 | 其他 | 在後面加上 `/v1/systemone` | `Authorization` |
+
+前端直連模式用同一套規則組網址（`appendSystemOnePath()`，位於 [`src/lib/s1-utils.ts`](../src/lib/s1-utils.ts)）。
 
 回應會保留上游的狀態碼、`Content-Type` 與本文，並加上 `X-S1-Upstream-Latency` 標頭（毫秒）。前端會優先用這個值當作延遲時間，避免把 Proxy 本身的往返時間算進去。
 

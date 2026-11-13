@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { QuestionBuilderItem } from '@/types/systemone';
 import { DEFAULT_PROFILES } from '@/lib/presets';
 import {
+  appendSystemOnePath,
+  formatEndpointPreviewUrl,
   getScoreLevelLimitForProfile,
   validateQuestionsBuilder,
 } from '@/lib/s1-utils';
@@ -155,5 +157,34 @@ describe('score level limits per provider', () => {
     });
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toContain('Cloudflare Workers AI 最多只接受 10 個等級');
+  });
+});
+
+describe('appendSystemOnePath / formatEndpointPreviewUrl', () => {
+  test('does not double /v1 when the base URL already ends with it', () => {
+    expect(appendSystemOnePath('https://api.typesafe.ai/v1')).toBe(
+      'https://api.typesafe.ai/v1/systemone'
+    );
+    expect(appendSystemOnePath('https://api.typesafe.ai/v1/')).toBe(
+      'https://api.typesafe.ai/v1/systemone'
+    );
+    expect(formatEndpointPreviewUrl('https://api.typesafe.ai/v1')).toBe(
+      'https://api.typesafe.ai/v1/systemone'
+    );
+  });
+
+  test('keeps existing behavior for other base URLs', () => {
+    expect(appendSystemOnePath('https://api.typesafe.ai')).toBe(
+      'https://api.typesafe.ai/v1/systemone'
+    );
+    expect(appendSystemOnePath('https://api.typesafe.ai/v1/systemone')).toBe(
+      'https://api.typesafe.ai/v1/systemone'
+    );
+    expect(appendSystemOnePath('http://localhost:11434')).toBe(
+      'http://localhost:11434/v1/systemone'
+    );
+    expect(appendSystemOnePath('https://example.com/v2')).toBe(
+      'https://example.com/v2/v1/systemone'
+    );
   });
 });

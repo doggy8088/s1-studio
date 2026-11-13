@@ -72,6 +72,11 @@ for (const rt of runtimes) {
       );
     });
 
+    test('SystemOne base URL ending in /v1 does not double the /v1 segment', async () => {
+      await rt.call(proxyRequest('https://api.typesafe.ai/v1'));
+      expect(calls[0].url).toBe('https://api.typesafe.ai/v1/systemone');
+    });
+
     test('SystemOne target: unchanged /v1/systemone + Authorization', async () => {
       await rt.call(proxyRequest('https://ollama.com'));
       expect(calls[0].url).toBe('https://ollama.com/v1/systemone');

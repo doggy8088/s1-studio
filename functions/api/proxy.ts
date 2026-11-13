@@ -200,9 +200,11 @@ export const onRequestPost = async (context: { request: Request }) => {
 
     const targetEndpoint = isGeminiTarget
       ? resolveGeminiDecisionsEndpoint(cleanedBase)
-      : cleanedBase.endsWith('/v1/systemone') || cleanedBase.includes('/ai/run/')
+      : /\/v1\/systemone$/i.test(cleanedBase) || cleanedBase.includes('/ai/run/')
         ? cleanedBase
-        : `${cleanedBase}/v1/systemone`;
+        : /\/v1$/i.test(cleanedBase)
+          ? `${cleanedBase}/systemone`
+          : `${cleanedBase}/v1/systemone`;
 
     let parsedUrl: URL;
     try {

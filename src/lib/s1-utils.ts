@@ -183,7 +183,19 @@ export function formatEndpointPreviewUrl(
       (match && match[1] ? match[1].trim() : '$CLOUDFLARE_ACCOUNT_ID');
     return buildCloudflareEndpointUrl(resolvedAccount, model);
   }
-  return clean.endsWith('/v1/systemone') ? clean : `${clean}/v1/systemone`;
+  return appendSystemOnePath(clean);
+}
+
+/**
+ * Append the SystemOne path to a base URL without doubling `/v1`:
+ * `…/v1/systemone` stays as is, `…/v1` gets `/systemone`, anything else
+ * gets `/v1/systemone`.
+ */
+export function appendSystemOnePath(baseUrl: string): string {
+  const clean = baseUrl.trim().replace(/\/+$/, '');
+  if (/\/v1\/systemone$/i.test(clean)) return clean;
+  if (/\/v1$/i.test(clean)) return `${clean}/systemone`;
+  return `${clean}/v1/systemone`;
 }
 
 export const LOCAL_OLLAMA_NOT_DOWNLOADED_MODEL = 'clef (尚未下載)';
