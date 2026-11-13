@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const TYPESAFE_IMAGES_HEADER = 'TypeSafe-Danger-Zone-Images';
+
 function extractClefAndJevModels(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
   const obj = payload as Record<string, unknown>;
@@ -194,6 +196,12 @@ export async function POST(req: NextRequest) {
       }
     } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
+    }
+
+    // TypeSafe AI image opt-in header (https://docs.typesafe.ai/images)
+    const typeSafeImages = req.headers.get(TYPESAFE_IMAGES_HEADER);
+    if (typeSafeImages && typeSafeImages.trim().length > 0) {
+      forwardHeaders[TYPESAFE_IMAGES_HEADER] = typeSafeImages.trim();
     }
 
     const startTime = performance.now();

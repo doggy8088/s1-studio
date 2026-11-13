@@ -26,6 +26,7 @@
 | `x-s1-proxy-action` | 否 | 省略時轉送決策請求；`models` 探索模型；`ollama-pull` 拉取 Ollama 模型 |
 | `Authorization` | 否 | `Bearer <API Key>`，依目標轉成對應的驗證方式 |
 | `x-goog-api-key` | 否 | 直接指定 Gemini API Key，優先於 `Authorization` |
+| `TypeSafe-Danger-Zone-Images` | 否 | TypeSafe AI 圖片功能的啟用標頭，有值時原樣轉送給上游（v0.1.20 起） |
 | `Content-Type` | 是 | `application/json` |
 
 請求本文會原封不動轉送。
@@ -57,7 +58,7 @@ Gemini 與 Cloudflare 的模型清單是固定的，前端不會對它們呼叫�
 | 項目 | Next.js（本機） | Cloudflare Pages Function |
 | --- | --- | --- |
 | `localhost`、`127.0.0.1` 目標 | 允許 | 拒絕並回傳 400（Edge 連不到使用者電腦） |
-| CORS 預檢（`OPTIONS`） | 不需要（同網域） | `onRequestOptions` 回傳 `Access-Control-Allow-Headers: Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key` |
+| CORS 預檢（`OPTIONS`） | 不需要（同網域） | `onRequestOptions` 回傳 `Access-Control-Allow-Headers: Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, TypeSafe-Danger-Zone-Images` |
 | 回應 CORS 標頭 | 無 | `Access-Control-Allow-Origin: *` |
 | 延遲量測 | `performance.now()` | `Date.now()`（最少 1 毫秒） |
 

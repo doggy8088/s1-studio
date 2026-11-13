@@ -25,7 +25,8 @@ bun test -t "Gemini target"
 | 層級 | 檔案 | 驗證內容 | 是否連網 |
 | --- | --- | --- | --- |
 | 單元測試 | [`tests/gemini-decisions.test.ts`](../tests/gemini-decisions.test.ts) | Gemini 提供者判斷、端點組合、格式轉換、MIME 判斷、限制檢查、回應正規化 | 否 |
-| 路由測試 | [`tests/request-routing.test.ts`](../tests/request-routing.test.ts) | `executeSystemOneRequest()` 的網址、標頭、本文與錯誤處理；程式碼匯出 | 否（mock `fetch`） |
+| 單元測試 | [`tests/typesafe.test.ts`](../tests/typesafe.test.ts) | TypeSafe 提供者判斷、圖片格式偵測、`assets` 轉換與參照寫入、標頭條件；各提供者的 score 等級上限 | 否 |
+| 路由測試 | [`tests/request-routing.test.ts`](../tests/request-routing.test.ts) | `executeSystemOneRequest()` 的網址、標頭、本文、score 刻度與錯誤處理；程式碼匯出（含 TypeSafe 官方 SDK 範例） | 否（mock `fetch`） |
 | Proxy 測試 | [`tests/proxy.test.ts`](../tests/proxy.test.ts) | Next.js 與 Cloudflare 兩種 `/api/proxy` 的轉送行為與 CORS 預檢 | 否（mock `fetch`） |
 | 整合測試 | [`tests/gemini-live.test.ts`](../tests/gemini-live.test.ts) | 以 SystemOne 格式呼叫真實 Gemini API：三種題型、JSON State 加圖片、無效金鑰 | 是 |
 
@@ -36,9 +37,10 @@ bun test -t "Gemini target"
 - **Ollama Cloud**：仍經由 Proxy 送出 SystemOne 本文，使用 `Authorization: Bearer`，且不帶 `x-goog-api-key`。
 - **Cloudflare Workers AI**：仍組合 `/ai/run/@cf/cloudflare/clef` 網址，`model` 欄位縮寫成 `clef`，圖片轉成 data URI。
 - **內建模擬器**：仍直接呼叫 `/api/mock-systemone/v1/systemone`。
-- **Score 顯示**：非 Gemini 提供者不帶 `scoreScale`，沿用原本的判斷邏輯。
+- **Score 刻度**：v0.1.20 起刻意改變行為，Ollama、Cloudflare、TypeSafe 標為 `'index'`，模擬器標為 `'unit'`。
+- **沒有圖片的 TypeSafe 請求**：本文與標頭與修正前完全相同；Ollama 的圖片仍以 `images` 陣列送出。
 - **cURL 匯出**：Ollama Cloud 的 cURL 指令逐字比對，與修改前完全相同。
-- **Proxy**：SystemOne 與 Cloudflare 目標的轉送網址與 `Authorization` 標頭不變。
+- **Proxy**：SystemOne 與 Cloudflare 目標的轉送網址與 `Authorization` 標頭不變；沒有 `TypeSafe-Danger-Zone-Images` 時不會多加標頭。
 
 ## Mock `fetch` 的寫法
 

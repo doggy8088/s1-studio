@@ -54,6 +54,7 @@ import {
   pullLocalOllamaModel,
   questionsRecordToBuilderItems,
   validateQuestionsBuilder,
+  getScoreLevelLimitForProfile,
 } from '@/lib/s1-utils';
 import { isGeminiDecisionsProfile } from '@/lib/gemini-decisions';
 import {
@@ -693,9 +694,14 @@ export function S1StudioApp() {
     [questionItems]
   );
 
+  const scoreLevelLimit = useMemo(
+    () => getScoreLevelLimitForProfile(activeProfile),
+    [activeProfile]
+  );
+
   const validationIssues = useMemo(
-    () => validateQuestionsBuilder(questionItems),
-    [questionItems]
+    () => validateQuestionsBuilder(questionItems, { scoreLevelLimit }),
+    [questionItems, scoreLevelLimit]
   );
 
   const constructedPayload: S1RequestPayload = useMemo(() => {

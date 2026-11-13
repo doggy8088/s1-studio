@@ -86,12 +86,28 @@ for (const rt of runtimes) {
       await rt.call(proxyRequest(cf));
       expect(calls[0].url).toBe(cf);
     });
+
+    test('TypeSafe image opt-in header is forwarded when present', async () => {
+      const req = proxyRequest('https://api.typesafe.ai');
+      req.headers.set('TypeSafe-Danger-Zone-Images', 'true');
+      await rt.call(req);
+      expect(calls[0].url).toBe('https://api.typesafe.ai/v1/systemone');
+      const h = calls[0].init.headers as Record<string, string>;
+      expect(h['TypeSafe-Danger-Zone-Images']).toBe('true');
+      expect(h.Authorization).toBe('Bearer KEY123');
+    });
+
+    test('TypeSafe image header is not added when absent', async () => {
+      await rt.call(proxyRequest('https://api.typesafe.ai'));
+      const h = calls[0].init.headers as Record<string, string>;
+      expect(h['TypeSafe-Danger-Zone-Images']).toBeUndefined();
+    });
   });
 }
 
-test('Cloudflare proxy CORS preflight allows x-goog-api-key', async () => {
+test('Cloudflare proxy CORS preflight allows x-goog-api-key and TypeSafe image header', async () => {
   const res = await cfProxyOptions();
-  expect(res.headers.get('Access-Control-Allow-Headers')).toContain(
-    'x-goog-api-key'
-  );
+  const allowed = res.headers.get('Access-Control-Allow-Headers');
+  expect(allowed).toContain('x-goog-api-key');
+  expect(allowed).toContain('TypeSafe-Danger-Zone-Images');
 });

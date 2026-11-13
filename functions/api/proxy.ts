@@ -3,6 +3,8 @@
  * Automatically mounted at POST /api/proxy on Cloudflare Pages.
  */
 
+const TYPESAFE_IMAGES_HEADER = 'TypeSafe-Danger-Zone-Images';
+
 function extractClefAndJevModels(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
   const obj = payload as Record<string, unknown>;
@@ -65,7 +67,7 @@ export const onRequestOptions = async () => {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers':
-        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key',
+        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, TypeSafe-Danger-Zone-Images',
     },
   });
 };
@@ -250,6 +252,12 @@ export const onRequestPost = async (context: { request: Request }) => {
       }
     } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
+    }
+
+    // TypeSafe AI image opt-in header (https://docs.typesafe.ai/images)
+    const typeSafeImages = request.headers.get(TYPESAFE_IMAGES_HEADER);
+    if (typeSafeImages && typeSafeImages.trim().length > 0) {
+      forwardHeaders[TYPESAFE_IMAGES_HEADER] = typeSafeImages.trim();
     }
 
     const startTime = Date.now();

@@ -71,7 +71,7 @@ Ollama 提供 SystemOne 決策端點 `POST /v1/systemone`，可在本機執行 `
 
 - **noul**：只有 `noul`（0 到 1 的數字，不是布林值），沒有 `confidence`。
 - **confidence**：`1 - H(p) / ln(N)`，以熵計算，官方註明「Not calibrated correctness」。
-- **score**：0 到「等級數 − 1」的加權等級索引，「Not rounded to a level or normalized to 0–1」。S1 Studio 目前對小於等於 1 的值判斷有誤，見 [已知問題](../known-issues.md#score-刻度判斷錯誤)。
+- **score**：0 到「等級數 − 1」的加權等級索引，「Not rounded to a level or normalized to 0–1」。S1 Studio 自 v0.1.20 起一律以等級索引顯示，見 [已知問題](../known-issues.md#score-刻度判斷錯誤)。
 - **output_tokens**：模型內部評分用的 token，不是回應 JSON 的長度。
 
 ## 限制

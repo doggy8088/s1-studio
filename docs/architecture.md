@@ -2,7 +2,7 @@
 
 本文說明 S1 Studio 的整體架構、雙模式建置、請求流程與模組分工。
 
-- **適用版本**：v0.1.19 以後
+- **適用版本**：v0.1.20 以後
 - **相關文件**：[Proxy 代理協定](proxy.md)、[提供者總覽](providers/README.md)、[請求格式差異](formats/request.md)
 
 ## 一句話說明
@@ -55,6 +55,7 @@ flowchart LR
 | [`src/types/systemone.ts`](../src/types/systemone.ts) | 請求、回應、Profile、範本與歷史紀錄的型別定義 |
 | [`src/lib/s1-utils.ts`](../src/lib/s1-utils.ts) | 提供者判斷、端點組合、模型探索、Local Ollama 診斷、送出請求、回應正規化、問題驗證、雙峰分佈偵測 |
 | [`src/lib/gemini-decisions.ts`](../src/lib/gemini-decisions.ts) | Gemini Decisions API 的格式轉換、MIME 判斷、限制檢查與 usage 對應（只依賴型別，不含 React 或 fetch） |
+| [`src/lib/typesafe.ts`](../src/lib/typesafe.ts) | TypeSafe AI 的提供者判斷、圖片 `assets` 轉換、格式檢查與啟用標頭（只依賴型別） |
 | [`src/lib/code-exporter.ts`](../src/lib/code-exporter.ts) | 產生 cURL、Python、TypeScript 範例程式碼 |
 | [`src/lib/presets.ts`](../src/lib/presets.ts) | 內建 Profile、網址範本與場景範本 |
 | [`src/lib/profile-link.ts`](../src/lib/profile-link.ts) | 網址 Deep Link 的解析、驗證與匯入計畫 |
@@ -71,6 +72,7 @@ flowchart LR
 | --- | --- |
 | `isGeminiDecisionsProfile()` | `id === 'gemini-decisions-api'`，或網址主機名稱完全等於 `generativelanguage.googleapis.com` |
 | `isCloudflareProfile()` | id 或名稱含 `cloudflare`，或網址含 `/client/v4/accounts/`、`/ai/run/` |
+| `isTypeSafeProfile()` | `id === 'typesafe-ai-jev'`，或網址主機名稱為 `typesafe.ai` 或其子網域 |
 | `isLocalOllamaProfile()` | `id === 'local-ollama-clef'`，或網址含 `localhost:11434`、`127.0.0.1:11434` |
 | 內建模擬器 | `id === 's1-builtin-simulator'`，或網址以 `/api/` 開頭 |
 

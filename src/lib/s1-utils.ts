@@ -19,6 +19,14 @@ import {
   toGeminiDecisionsRequest,
   validateGeminiDecisionsPayload,
 } from './gemini-decisions';
+import {
+  isTypeSafeProfile,
+  toTypeSafeRequest,
+  typeSafeRequestHeaders,
+  validateTypeSafeImages,
+} from './typesafe';
+
+export { isTypeSafeProfile } from './typesafe';
 
 export const QUESTION_KEY_REGEX = /^[a-zA-Z0-9_.-]{1,100}$/;
 export const MAX_QUESTIONS = 64;
@@ -1015,11 +1023,59 @@ export interface ValidationIssue {
   message: string;
 }
 
+export interface ScoreLevelLimit {
+  providerName: string;
+  max: number;
+}
+
+function hostnameOf(url?: string): string {
+  try {
+    return new URL((url || '').trim()).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+export function isOllamaCloudProfile(
+  profile: Pick<EndpointProfile, 'id' | 'baseUrl'>
+): boolean {
+  const host = hostnameOf(profile.baseUrl);
+  return (
+    profile.id === 'ollama-cloud-clef' ||
+    host === 'ollama.com' ||
+    host.endsWith('.ollama.com')
+  );
+}
+
+/**
+ * Maximum number of `score` levels the provider accepts, when documented:
+ * - Ollama (local and cloud) and Cloudflare Workers AI: 10
+ *   (https://docs.ollama.com/api/systemone, https://developers.cloudflare.com/workers-ai/models/clef/)
+ * - Gemini Decisions API: 255 (https://aistudio.google.com/docs/decisions-api)
+ * TypeSafe AI, the built-in simulator and custom endpoints have no documented
+ * upper limit, so no limit is enforced (`undefined`).
+ */
+export function getScoreLevelLimitForProfile(
+  profile: Pick<EndpointProfile, 'id' | 'name' | 'baseUrl'>
+): ScoreLevelLimit | undefined {
+  if (isGeminiDecisionsProfile(profile)) {
+    return { providerName: 'Gemini Decisions API', max: 255 };
+  }
+  if (isCloudflareProfile(profile)) {
+    return { providerName: 'Cloudflare Workers AI', max: 10 };
+  }
+  if (isLocalOllamaProfile(profile) || isOllamaCloudProfile(profile)) {
+    return { providerName: 'Ollama', max: 10 };
+  }
+  return undefined;
+}
+
 /**
  * Validate Questions Builder items against SystemOne constraints
  */
 export function validateQuestionsBuilder(
-  items: QuestionBuilderItem[]
+  items: QuestionBuilderItem[],
+  options: { scoreLevelLimit?: ScoreLevelLimit } = {}
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -1103,6 +1159,14 @@ export function validateQuestionsBuilder(
           questionId: item.id,
           field: 'criteria',
           message: `Score 問題 "${key || '未命名'}" 最少需要 2 個等級 (Levels).`,
+        });
+      }
+      const limit = options.scoreLevelLimit;
+      if (limit && validLevels.length > limit.max) {
+        issues.push({
+          questionId: item.id,
+          field: 'criteria',
+          message: `Score 問題 "${key || '未命名'}" 有 ${validLevels.length} 個等級，${limit.providerName} 最多只接受 ${limit.max} 個等級 (Levels).`,
         });
       }
     }
@@ -1228,6 +1292,27 @@ export async function executeSystemOneRequest(
 
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const isInternalMock = baseUrlClean.startsWith('/api/');
+  const isTypeSafe = !isCf && isTypeSafeProfile(profile);
+  const isBuiltinSimulator =
+    isInternalMock || profile.id === 's1-builtin-simulator';
+
+  if (isTypeSafe) {
+    const imageError = validateTypeSafeImages(finalPayload.images);
+    if (imageError) {
+      return {
+        profileId: profile.id,
+        profileName: profile.name,
+        model: modelToUse || '(default)',
+        status: 400,
+        statusText: 'Unsupported Image Format',
+        latencyMs: 0,
+        error: imageError,
+        timestamp: Date.now(),
+      };
+    }
+  }
+  // TypeSafe sends images as `assets` + references (https://docs.typesafe.ai/images).
+  const wireBody = isTypeSafe ? toTypeSafeRequest(finalPayload) : finalPayload;
 
   const targetEndpoint = isCf
     ? buildCloudflareEndpointUrl(
@@ -1262,6 +1347,9 @@ export async function executeSystemOneRequest(
   if (profile.apiKey && profile.apiKey.trim().length > 0) {
     headers['Authorization'] = `Bearer ${profile.apiKey.trim()}`;
   }
+  if (isTypeSafe) {
+    Object.assign(headers, typeSafeRequestHeaders(finalPayload));
+  }
 
   const startTime = performance.now();
 
@@ -1273,13 +1361,13 @@ export async function executeSystemOneRequest(
       response = await fetch('/api/proxy', {
         method: 'POST',
         headers,
-        body: JSON.stringify(finalPayload),
+        body: JSON.stringify(wireBody),
       });
     } else {
       response = await fetch(targetEndpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify(finalPayload),
+        body: JSON.stringify(wireBody),
       });
     }
 
@@ -1294,9 +1382,12 @@ export async function executeSystemOneRequest(
     try {
       const parsed = JSON.parse(rawResponseText);
       if (response.ok) {
+        // Ollama, Cloudflare and TypeSafe document `score` as a probability-weighted
+        // level index (0 .. levels-1); only the built-in simulator returns 0-1.
         parsedJson = normalizeS1ResponsePayload(
           parsed as Record<string, unknown>,
-          finalPayload.questions
+          finalPayload.questions,
+          { scoreScale: isBuiltinSimulator ? 'unit' : 'index' }
         );
       } else {
         const cfError =

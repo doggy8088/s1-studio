@@ -115,11 +115,11 @@ S1 Studio 在 `ScoreResult` 以 `scoreScale` 標示刻度：
 
 | `scoreScale` | 指標位置計算 | 刻度標籤 | 設定時機 |
 | --- | --- | --- | --- |
-| `'index'` | `score ÷ (等級數 − 1)` | `Scale: 0 ~ N 等級索引` | Gemini 回應 |
-| `'unit'` | `score` | `Scale: 0.000 ~ 1.000` | 目前沒有提供者使用 |
-| 未設定 | `score > 1` 時視為索引，否則視為 0 到 1 | `Scale: 0.000 ~ 1.000` | 其他提供者（與 v0.1.18 以前相同） |
+| `'index'` | `score ÷ (等級數 − 1)` | `Scale: 0 ~ N 等級索引` | Ollama、Cloudflare、TypeSafe AI、Gemini 與自訂端點（v0.1.20 起） |
+| `'unit'` | `score` | `Scale: 0.000 ~ 1.000` | 內建模擬器（v0.1.20 起） |
+| 未設定 | `score > 1` 時視為索引，否則視為 0 到 1 | 依判斷結果顯示 | 只出現在 v0.1.20 以前存下的歷史紀錄 |
 
-> **已知問題**：「未設定」是舊版留下的推測規則。Ollama、Cloudflare 與 TypeSafe 回傳的索引值小於等於 1 時（例如 3 個等級回傳 0.83），指標會被當成 0 到 1 的比例畫錯位置，刻度標籤也會錯。修正方式與影響範圍見 [已知問題](../known-issues.md#score-刻度判斷錯誤)。
+v0.1.19 以前，Gemini 以外的提供者都不設定 `scoreScale`，小於等於 1 的索引值（例如 3 個等級回傳 0.83）會被畫成 0 到 1 的比例。v0.1.20 已修正，詳見 [已知問題](../known-issues.md#score-刻度判斷錯誤)。
 
 ## usage 欄位
 

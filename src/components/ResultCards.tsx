@@ -780,7 +780,7 @@ function SingleQuestionDiagnostic({
             {rawScore.toFixed(3)}
           </span>
           <span className="font-mono text-xs text-zinc-400">
-            {scoreRes.scoreScale === 'index'
+            {isIndexScale
               ? `(Scale: 0 ~ ${maxLevelIndex} 等級索引 · ${levels.length} 級)`
               : `(Scale: 0.000 ~ 1.000 · ${levels.length} 級)`}
           </span>

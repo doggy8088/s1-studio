@@ -54,6 +54,8 @@
 - [Noul](https://docs.typesafe.ai/primitives/noul)、[Choice](https://docs.typesafe.ai/primitives/choice)、[Score](https://docs.typesafe.ai/primitives/score)
 - [SDK](https://docs.typesafe.ai/sdk)
 - [typesafe-sdk-python](https://github.com/typesafe-ai/typesafe-sdk-python)、[typesafe-sdk-js](https://github.com/typesafe-ai/typesafe-sdk-js)
+- [Python SDK](https://docs.typesafe.ai/sdk/python)：[TypeSafeClient](https://docs.typesafe.ai/sdk/python/api/clients/sync)、[回應型別](https://docs.typesafe.ai/sdk/python/api/types/responses)、[Image](https://docs.typesafe.ai/sdk/python/api/types/assets)
+- [JavaScript SDK](https://docs.typesafe.ai/sdk/javascript)：[TypeSafeClient](https://docs.typesafe.ai/sdk/javascript/api/classes/TypeSafeClient)、[TypeSafeClientConfig](https://docs.typesafe.ai/sdk/javascript/api/interfaces/TypeSafeClientConfig)、[Image](https://docs.typesafe.ai/sdk/javascript/api/classes/Image)
 
 ## Next.js
 

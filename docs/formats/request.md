@@ -56,7 +56,7 @@ Gemini 會把相鄰的文字區塊直接串接，中間不加分隔字元，所�
 | MIME 類型 | 不需要 | 寫在 data URL 或 `content_type` | `format`：`png`、`jpg`、`jpeg` | `mime_type` 必填 |
 | 額外標頭 | 無 | 無 | `TypeSafe-Danger-Zone-Images: true` | 無 |
 | 數量與大小 | 雲端：最多 4 張、單張 4 MiB 與 1,600 萬畫素、合計 8 MiB | 最多 4 張、單張 4 MiB 與 1,600 萬畫素、合計 8 MiB | 單張 16 MiB、請求 32 MiB | 每次請求 100 MB |
-| S1 Studio 送出方式 | 原始 base64 | data URL，一律標為 `image/png` | 原始 base64 陣列（**與官方格式不符**，見 [已知問題](../known-issues.md#typesafe-ai-圖片格式不符)） | `image` 區塊，MIME 依檔頭判斷 |
+| S1 Studio 送出方式 | 原始 base64 | data URL，一律標為 `image/png` | `assets` 加上寫入 `state` 的參照字串，並帶上標頭；只接受 PNG、JPEG（v0.1.20 起，見 [TypeSafe AI](../providers/typesafe-ai.md#圖片與其他提供者不同)） | `image` 區塊，MIME 依檔頭判斷 |
 
 Gemini 另有選填的 `resolution`（`low`、`medium`、`high`、`ultra_high`）。
 
@@ -125,12 +125,12 @@ S1 Studio 轉換時保留選項的原始順序，但 Gemini 評估前會自行�
 | 問題鍵格式 | `[a-zA-Z0-9_.-]`，1 到 100 字元 | 英數、`_`、`.`、`-`，最多 100 字元（雲端） | 英數、`_`、`.`、`-`，最多 100 字元 | 未明訂 | `[A-Za-z0-9_-]`，1 到 64 字元（**不可含 `.`**） |
 | 問題數 | 1 到 64 | 1 到 64 | 1 到 64 | 無固定上限，受 context 限制 | 1 到 1,000 |
 | choice 選項數 | 至少 2 | 2 到 255（依模型而定；指南表格寫 2 到 26） | 2 到 255 | 最多 255 | 2 到 255 |
-| score 等級數 | 至少 2 | 2 到 10 | 2 到 10 | 未明訂 | 2 到 255（建議 2 到 10） |
+| score 等級數 | 至少 2，並依提供者檢查上限 | 2 到 10 | 2 到 10 | 未明訂 | 2 到 255（建議 2 到 10） |
 | `instructions` 型別 | 字串 | 字串 | 字串、物件或陣列 | 字串 | 只接受文字 |
 | 選項鍵長度 | 未限制 | 未明訂 | 未明訂 | 未明訂 | 1 到 128 字元（最多 512 個 UTF-8 位元組） |
 | 輸入過長 | — | 拒絕（400／413），不截斷 | **截斷文字 State** 以符合 token 上限 | 拒絕 | 拒絕 |
 
-S1 Studio 編輯器只檢查共通的規則（問題數 64、至少 2 個選項或等級），不會依提供者檢查 score 等級上限。例如 11 個等級的 score 題送到 Ollama 或 Cloudflare 時，會由 API 回傳錯誤。
+S1 Studio 編輯器檢查共通的規則（問題數 64、至少 2 個選項或等級），並自 v0.1.20 起依目前的 Profile 檢查 score 等級上限（`getScoreLevelLimitForProfile()`）：Ollama 與 Cloudflare 為 10、Gemini 為 255，TypeSafe AI、模擬器與自訂端點不限制。超過上限時編輯器會顯示錯誤並停用執行。
 
 問題鍵含 `.` 或超過 64 字元時，`validateGeminiDecisionsPayload()` 會在送出前擋下並列出不符合的鍵，不會發出請求。內建場景範本的問題鍵都符合 Gemini 的規則。
 

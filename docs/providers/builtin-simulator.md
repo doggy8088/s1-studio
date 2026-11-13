@@ -33,7 +33,7 @@
 | choice | 選項鍵或描述的關鍵字出現在 State 中時加權，再以雜湊值加入少量變化，最後正規化成機率 |
 | score | State 含 `bimodal`、`ambiguous`、`polarized` 時產生兩極化分佈；含 `urgent`、`immediately` 等字時偏向高等級；其餘以雜湊值決定 |
 
-- **score 刻度**：`score` 為 0 到 1 的相對位置（`Σ 機率 × 索引 ÷ (等級數 − 1)`），與 Gemini 的等級索引不同，見 [回應格式差異](../formats/response.md#score-的刻度)。
+- **score 刻度**：`score` 為 0 到 1 的相對位置（`Σ 機率 × 索引 ÷ (等級數 − 1)`），與真實提供者的等級索引不同。S1 Studio 會把模擬器的結果標為 `scoreScale: 'unit'`，見 [回應格式差異](../formats/response.md#score-的刻度)。
 - **固定延遲**：每次請求固定等待 65 毫秒，模擬推論時間。
 - **確定性**：相同輸入永遠得到相同結果。
 

@@ -171,18 +171,88 @@ describe('regression: existing providers are unchanged', () => {
     expect(bodyOf(calls[0]).state).toBe('hello');
   });
 
-  test('legacy score rendering semantics: no scoreScale for non-Gemini', async () => {
-    nextResponse = () =>
-      new Response(
-        JSON.stringify({ answers: { s: { type: 'score', score: 0.4, confidence: 0.5 } } }),
-        { status: 200 }
-      );
+  const scoreAnswer = () =>
+    new Response(
+      JSON.stringify({ answers: { s: { type: 'score', score: 0.4, confidence: 0.5 } } }),
+      { status: 200 }
+    );
+  const scorePayload: S1RequestPayload = {
+    ...s1Payload,
+    questions: { s: { type: 'score', instructions: 'x', criteria: ['a', 'b', 'c'] } },
+  };
+
+  // Ollama, Cloudflare and TypeSafe document score as a probability-weighted
+  // level index (0 .. levels-1), so even a value <= 1 is an index.
+  for (const [id, patch] of [
+    ['typesafe-ai-jev', { apiKey: 'k' }],
+    ['ollama-cloud-clef', { apiKey: 'k' }],
+    ['local-ollama-clef', {}],
+    ['cloudflare-workers-ai-clef', { apiKey: 'k', cloudflareAccountId: 'acct' }],
+  ] as const) {
+    test(`${id}: score is marked as level index (scoreScale=index)`, async () => {
+      nextResponse = scoreAnswer;
+      const run = await executeSystemOneRequest(profile(id, patch), scorePayload);
+      expect(run.response?.scores?.s.score).toBe(0.4);
+      expect(run.response?.scores?.s.scoreScale).toBe('index');
+    });
+  }
+
+  test('built-in simulator keeps its 0-1 score (scoreScale=unit)', async () => {
+    nextResponse = scoreAnswer;
+    const run = await executeSystemOneRequest(profile('s1-builtin-simulator'), scorePayload);
+    expect(run.response?.scores?.s.scoreScale).toBe('unit');
+  });
+
+  test('TypeSafe without images: body and headers unchanged', async () => {
+    await executeSystemOneRequest(profile('typesafe-ai-jev', { apiKey: 'k' }), {
+      ...s1Payload,
+      model: 'jev-latest',
+    });
+    expect(headersOf(calls[0])['x-s1-target-url']).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(headersOf(calls[0])['TypeSafe-Danger-Zone-Images']).toBeUndefined();
+    expect(bodyOf(calls[0])).toEqual({
+      model: 'jev-latest',
+      state: 'hello',
+      questions: s1Payload.questions,
+    });
+  });
+
+  test('TypeSafe with images: sends assets + references + opt-in header', async () => {
+    await executeSystemOneRequest(profile('typesafe-ai-jev', { apiKey: 'k' }), {
+      ...s1Payload,
+      model: 'jev-latest',
+      images: ['iVBORw0KGgoAAA', 'data:image/jpeg;base64,/9j/4AAQ'],
+    });
+    expect(headersOf(calls[0])['TypeSafe-Danger-Zone-Images']).toBe('true');
+    const body = bodyOf(calls[0]);
+    expect(body.images).toBeUndefined();
+    const refs = Object.keys(body.assets);
+    expect(refs).toHaveLength(2);
+    expect(new Set(refs).size).toBe(2);
+    expect(body.assets[refs[0]]).toEqual({ type: 'image', format: 'png', data_base64: 'iVBORw0KGgoAAA' });
+    expect(body.assets[refs[1]]).toEqual({ type: 'image', format: 'jpeg', data_base64: '/9j/4AAQ' });
+    for (const ref of refs) expect(body.state).toContain(ref);
+    expect(body.state.startsWith('hello\n\n')).toBe(true);
+  });
+
+  test('TypeSafe rejects WebP before sending', async () => {
     const run = await executeSystemOneRequest(profile('typesafe-ai-jev', { apiKey: 'k' }), {
       ...s1Payload,
-      questions: { s: { type: 'score', instructions: 'x', criteria: ['a', 'b'] } },
+      images: ['iVBORw0KGgoAAA', 'UklGRiQAAABXRUJQ'],
     });
-    expect(run.response?.scores?.s.score).toBe(0.4);
-    expect(run.response?.scores?.s.scoreScale).toBeUndefined();
+    expect(calls).toHaveLength(0);
+    expect(run.status).toBe(400);
+    expect(run.error).toContain('第 2 張');
+  });
+
+  test('Ollama images are still sent as a plain images array', async () => {
+    await executeSystemOneRequest(profile('ollama-cloud-clef', { apiKey: 'sk' }), {
+      ...s1Payload,
+      images: ['UklGRiQAAABXRUJQ'],
+    });
+    expect(bodyOf(calls[0]).images).toEqual(['UklGRiQAAABXRUJQ']);
+    expect(bodyOf(calls[0]).assets).toBeUndefined();
+    expect(headersOf(calls[0])['TypeSafe-Danger-Zone-Images']).toBeUndefined();
   });
 });
 
@@ -233,5 +303,102 @@ describe('code exporter', () => {
     }
   }
 }' | jq`);
+  });
+});
+
+describe('code exporter: TypeSafe AI official SDKs', () => {
+  const ts = profile('typesafe-ai-jev', { apiKey: 'tsk-SECRET' });
+  const opts = { includeRawApiKey: false };
+  const tsPayload: S1RequestPayload = {
+    model: 'jev-latest',
+    state: 'The parcel is true to size.',
+    questions: {
+      ok: { type: 'noul', instructions: 'ok?', criteria: { true: 'yes', false: 'no' } },
+      team: { type: 'choice', instructions: 'team?', criteria: { billing: null, tech: null } },
+      s: { type: 'score', instructions: 'urgent?', criteria: ['low', 'mid', 'high'] },
+    },
+  };
+
+  test('Python uses typesafe_sdk TypeSafeClient.system_one', () => {
+    const py = generatePythonSnippet(ts, tsPayload, opts);
+    expect(py).toContain('# pip install typesafe-sdk');
+    expect(py).toContain('from typesafe_sdk import TypeSafeClient');
+    expect(py).toContain('client.system_one(');
+    expect(py).toContain('api_key=os.environ["TYPESAFE_API_KEY"]');
+    expect(py).toContain('base_url="https://api.typesafe.ai"');
+    expect(py).toContain('model="jev-latest"');
+    expect(py).toContain("result.nouls['ok'].noul");
+    expect(py).toContain("result.choices['team'].choice");
+    expect(py).toContain("result.scores['s'].score");
+    expect(py).not.toContain('from typesafe import');
+    expect(py).not.toContain('systemone.evaluate');
+    expect(py).not.toContain('images=');
+    expect(py).not.toContain('tsk-SECRET');
+    // Python literal must not rewrite true/false inside strings or keys
+    expect(py).toContain('"The parcel is true to size."');
+    expect(py).toContain('"true": "yes"');
+    expect(py).toContain('"billing": None');
+  });
+
+  test('TypeScript uses @typesafe-ai/sdk systemOne with baseURL', () => {
+    const code = generateTypeScriptSnippet(ts, tsPayload, opts, 'sdk');
+    expect(code).toContain('import { TypeSafeClient } from "@typesafe-ai/sdk"');
+    expect(code).toContain('baseURL: "https://api.typesafe.ai"');
+    expect(code).toContain('apiKey: process.env.TYPESAFE_API_KEY');
+    expect(code).toContain('client.systemOne(');
+    expect(code).toContain('result.answers');
+    expect(code).not.toContain('@typesafe/sdk');
+    expect(code).not.toContain('systemone.evaluate');
+  });
+
+  test('snippets with images use assets + Image.from_base64 / Image.fromBase64 + header', () => {
+    const withImg = { ...tsPayload, images: ['iVBORw0KGgoAAA'] };
+    const py = generatePythonSnippet(ts, withImg, opts);
+    expect(py).toContain('from typesafe_sdk import Image, TypeSafeClient');
+    expect(py).toContain('"<s1-image-1>": Image.from_base64("iVBORw0KGgoAAA")');
+    expect(py).toContain('assets=assets,');
+    expect(py).toContain('extra_headers={"TypeSafe-Danger-Zone-Images": "true"}');
+    expect(py).toContain('Image 1: <s1-image-1>');
+    const code = generateTypeScriptSnippet(ts, withImg, opts, 'sdk');
+    expect(code).toContain('import { Image, TypeSafeClient } from "@typesafe-ai/sdk"');
+    expect(code).toContain('"<s1-image-1>": Image.fromBase64("iVBORw0KGgoAAA")');
+    expect(code).toContain('{ headers: { "TypeSafe-Danger-Zone-Images": "true" } }');
+    const curl = generateCurlSnippet(ts, withImg, opts);
+    expect(curl).toContain('-H "TypeSafe-Danger-Zone-Images: true"');
+    expect(curl).toContain('"assets"');
+    expect(curl).not.toContain('"images"');
+    const fetchCode = generateTypeScriptSnippet(ts, withImg, opts, 'fetch');
+    expect(fetchCode).toContain('"TypeSafe-Danger-Zone-Images": "true",');
+  });
+
+  test('raw key is embedded only when requested', () => {
+    expect(generatePythonSnippet(ts, tsPayload, { includeRawApiKey: true })).toContain(
+      'api_key="tsk-SECRET"'
+    );
+    expect(
+      generateTypeScriptSnippet(ts, tsPayload, { includeRawApiKey: true }, 'sdk')
+    ).toContain('apiKey: "tsk-SECRET"');
+  });
+
+  test('non-TypeSafe providers do not use the TypeSafe SDK', () => {
+    const ollama = profile('ollama-cloud-clef');
+    const py = generatePythonSnippet(ollama, { ...tsPayload, model: 'clef:27b' }, opts);
+    expect(py).toContain('import requests');
+    expect(py).toContain('ENDPOINT = "https://ollama.com/v1/systemone"');
+    expect(py).toContain('os.environ.get("OLLAMA_API_KEY", "")');
+    expect(py).not.toContain('typesafe');
+    const tsSdk = generateTypeScriptSnippet(ollama, tsPayload, opts, 'sdk');
+    expect(tsSdk).toContain('fetch(ENDPOINT');
+    expect(tsSdk).not.toContain('@typesafe');
+
+    const cf = profile('cloudflare-workers-ai-clef', { cloudflareAccountId: 'acct' });
+    const cfPy = generatePythonSnippet(cf, { ...tsPayload, model: '@cf/cloudflare/clef' }, opts);
+    expect(cfPy).toContain('/accounts/acct/ai/run/@cf/cloudflare/clef');
+    expect(cfPy).toContain('(data.get("result") or {}).get("answers", {})');
+
+    const sim = profile('s1-builtin-simulator');
+    const simPy = generatePythonSnippet(sim, tsPayload, opts);
+    expect(simPy).toContain('ENDPOINT = "http://localhost:3000/api/mock-systemone/v1/systemone"');
+    expect(simPy).not.toContain('API_KEY');
   });
 });

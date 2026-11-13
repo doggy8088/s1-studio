@@ -2,7 +2,7 @@
 
 本目錄收錄 S1 Studio 的開發與技術文件，包含系統架構、各提供者的差異、請求與回應格式對照、測試與部署流程。使用說明請見專案根目錄的 [README](../README.md)。
 
-- **適用版本**：v0.1.19 以後
+- **適用版本**：v0.1.20 以後
 - **最後更新**：2026-11-13
 - **外部資料查證日期**：2026-11-13
 
@@ -18,7 +18,7 @@
 | 了解 CI 流程、設定 Secrets、部署 | [CI/CD](ci-cd.md) |
 | 了解 `/api/proxy` 的行為 | [Proxy 代理協定](proxy.md) |
 | 了解資料存在哪裡、Deep Link 的安全設計 | [資料儲存與 Profile](storage-and-profiles.md) |
-| 檢視目前與官方規格不一致的地方 | [已知問題](known-issues.md) |
+| 檢視與官方規格不一致的地方及修正紀錄 | [已知問題](known-issues.md) |
 | 找所有官方文件連結 | [參考資料總表](references.md) |
 
 ## 文件目錄
@@ -51,7 +51,7 @@
 
 ### 其他
 
-- [已知問題](known-issues.md)：score 刻度判斷、TypeSafe AI SDK 名稱與圖片格式等尚未修正的問題。
+- [已知問題](known-issues.md)：score 刻度判斷、TypeSafe AI SDK 名稱與圖片格式、score 等級上限等問題的修正紀錄（v0.1.20），以及尚存的限制。
 - [參考資料總表](references.md)：所有文件引用的官方連結。
 
 ## 撰寫規範

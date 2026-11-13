@@ -56,18 +56,49 @@ TypeSafe AI 的圖片不是放在 `images` 陣列，而是：
 2. 在頂層 `assets` 物件中定義圖片：`{"<id>": {"type": "image", "format": "png", "data_base64": "…"}}`，`data_base64` 不可含 `data:` 字首。
 3. 在 `state`、`instructions` 或 `criteria` 中以 id 引用圖片。
 
-限制為單張 16 MiB、請求 32 MiB，官方建議改用 multipart form-data 上傳。此功能標示為「Dreamer-ready」（尚未達正式品質）。
+限制為 PNG 或 JPEG、單張 16 MiB、每邊 280 到 1,568 畫素、總畫素 78,400 到 2,458,624、請求 32 MiB。官方建議改用 multipart form-data 上傳，JSON 內嵌 base64 也受支援。此功能標示為實驗性質。
 
-S1 Studio 目前送出的是 Ollama 格式的 `images` 陣列，與官方格式不符，見 [已知問題](../known-issues.md#typesafe-ai-圖片格式不符)。
+### S1 Studio 的轉換方式（v0.1.20 起）
+
+[`src/lib/typesafe.ts`](../../src/lib/typesafe.ts) 的 `toTypeSafeRequest()` 在送出時把 SystemOne 的 `images` 陣列轉成官方格式，沒有圖片的請求完全不變：
+
+| 步驟 | 做法 |
+| --- | --- |
+| 參照字串 | 每張圖片每次請求產生新的 `<s1-image-UUID>` |
+| `assets` | `{"type": "image", "format": "png" \| "jpeg", "data_base64": "…"}`，`format` 依檔頭判斷 |
+| 文字 State | 結尾加上 `Image 1: <ref>`、`Image 2: <ref>`… |
+| JSON 物件 State | 加上 `images` 欄位（已存在時改用 `images_2`…） |
+| 其他 JSON State | 包成 `{"state": 原值, "images": [...]}` |
+| 標頭 | 有圖片時加上 `TypeSafe-Danger-Zone-Images: true`，Proxy 會轉送 |
+| 格式檢查 | 非 PNG、JPEG（例如 WebP）時不送出，直接顯示錯誤 |
+
+例如文字 State `My order arrived broken.` 加上一張 PNG，實際送出：
+
+```json
+{
+  "model": "jev-latest",
+  "state": "My order arrived broken.\n\nImage 1: <s1-image-3f2a…>",
+  "questions": { "damaged": { "type": "noul", "instructions": "Is the item damaged?" } },
+  "assets": {
+    "<s1-image-3f2a…>": { "type": "image", "format": "png", "data_base64": "iVBORw0KGgo…" }
+  }
+}
+```
+
+S1 Studio 只檢查格式，不檢查尺寸；尺寸不符時由 API 回傳 400。修正紀錄見 [已知問題](../known-issues.md#typesafe-ai-圖片格式不符)。
 
 ## SDK
 
 | 語言 | 套件 | 用法 |
 | --- | --- | --- |
-| Python | `typesafe-sdk` | `from typesafe_sdk import TypeSafeClient`；`TypeSafeClient(model="jev-latest").system_one(state=…, questions=…)`；結果在 `response.choices`、`response.scores`、`response.nouls` |
-| TypeScript | `@typesafe-ai/sdk` | `new TypeSafeClient({ defaultModel: "jev-latest" }).systemOne({...})`；結果在 `response.answers` |
+| Python | `typesafe-sdk` | `from typesafe_sdk import TypeSafeClient`；`TypeSafeClient(api_key=…, base_url=…)` 的 `system_one(state=…, questions=…, model=…)`；結果在 `response.nouls`、`response.choices`、`response.scores`；圖片用 `assets={ref: Image.from_base64(…)}` 與 `extra_headers` |
+| TypeScript | `@typesafe-ai/sdk`（Node.js 22 以上） | `new TypeSafeClient({ apiKey, baseURL })` 的 `systemOne({ model, state, questions, assets })`；結果在 `response.answers`；圖片用 `Image.fromBase64(…)`，標頭放在第二個參數的 `headers` |
 
-> **注意**：PyPI 的 `typesafe` 是無關的套件；npm 的 `@typesafe/sdk` 不存在。S1 Studio 目前匯出的 SDK 範例使用錯誤的名稱，見 [已知問題](../known-issues.md#typesafe-ai-sdk-名稱錯誤)。
+`base_url`／`baseURL` 是 API 根網址（例如 `https://api.typesafe.ai`），SDK 會自行加上 `/v1/systemone`。兩個 SDK 都拒絕空白的 API Key。
+
+> **注意**：PyPI 的 `typesafe` 是無關的套件；npm 的 `@typesafe/sdk` 不存在。v0.1.19 以前 S1 Studio 匯出的 SDK 範例使用了這些錯誤的名稱，v0.1.20 已修正，見 [已知問題](../known-issues.md#typesafe-ai-sdk-名稱錯誤)。
+
+S1 Studio 的「匯出程式碼」只對 TypeSafe AI 產生 SDK 範例；其他 SystemOne 端點（Ollama、Cloudflare、模擬器、自訂端點）的 Python 範例使用 `requests`，TypeScript「SDK」分頁改為原生 `fetch`。
 
 ## CORS
 
@@ -87,3 +118,5 @@ S1 Studio 目前送出的是 Ollama 格式的 `images` 陣列，與官方格式�
 - [SDK](https://docs.typesafe.ai/sdk)
 - [typesafe-sdk-python（GitHub）](https://github.com/typesafe-ai/typesafe-sdk-python)
 - [typesafe-sdk-js（GitHub）](https://github.com/typesafe-ai/typesafe-sdk-js)
+- [Python SDK：TypeSafeClient](https://docs.typesafe.ai/sdk/python/api/clients/sync)
+- [JavaScript SDK：TypeSafeClient](https://docs.typesafe.ai/sdk/javascript/api/classes/TypeSafeClient)

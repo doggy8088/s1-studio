@@ -96,7 +96,7 @@ https://s1-studio.miniasp.com/?preset=preset-prompt-injection
 - **Score 結果卡**：顯示期望值 `score` 與 `confidence`，並內建 **兩極化分佈偵測（Bimodal Detection）**，當模型在首尾兩端等級同時給出高機率時自動發出警示。
 
 ### 5. 開發者工具：匯出、A/B 對比與歷史紀錄 (DX, Compare & History)
-- **Code Exporter**：一鍵匯出針對不同供應商最佳化的 `cURL -s ... | jq`、`Python SDK`、`TypeScript SDK` 與 `Native fetch` 程式碼，支援環境變數（如 `$CLOUDFLARE_API_KEY`、`$OLLAMA_API_KEY`、`$TYPESAFE_API_KEY`）或帶入實際金鑰切換。
+- **Code Exporter**：一鍵匯出針對不同供應商最佳化的 `cURL -s ... | jq`、`Python SDK`、`TypeScript SDK` 與 `Native fetch` 程式碼，支援環境變數（如 `$CLOUDFLARE_API_KEY`、`$OLLAMA_API_KEY`、`$TYPESAFE_API_KEY`）或帶入實際金鑰切換。TypeSafe AI 使用官方 SDK（Python `typesafe-sdk`、TypeScript `@typesafe-ai/sdk`），Gemini 使用 `google-genai`／`@google/genai`，其他 SystemOne 端點則產生 Python `requests` 與原生 `fetch` 範例。
 - **A/B 端點對比模式 (Compare Mode)**：同時選擇兩個 Profile 平行發送請求，並排比對延遲（Latency ms）、勝出選項與機率分佈差異。
 - **內建六大測試場景範本 (Presets) 與 IndexedDB History**：
   1. 客服工單分流與退款審核 (Customer Support Triage)
