@@ -4,6 +4,7 @@
 
 - 🌐 **線上使用 (Live Workbench)**：[https://s1-studio.miniasp.com/](https://s1-studio.miniasp.com/)
 - 📦 **GitHub Repository**：[https://github.com/doggy8088/s1-studio](https://github.com/doggy8088/s1-studio)
+- 📚 **技術文件**：[docs/README.md](docs/README.md)（系統架構、提供者差異、格式對照、測試與部署）
 
 ---
 
