@@ -17,6 +17,7 @@
   - **Ollama Cloud (`clef:27b`)**：`https://ollama.com`（預設模型 `clef:27b`，支援從 `/models` 動態探索與本機快取）
   - **Local Ollama (`clef`)**：`http://localhost:11434`（預設採用 Direct Mode 瀏覽器直連、不快取模型清單；內建三態連線診斷：未啟動 / CORS 阻擋 / 尚未下載模型，並提供一鍵透過 HTTP `POST /api/pull` 拉取 `clef` 模型）
   - **TypeSafe AI (`jev`)**：`https://api.typesafe.ai`（預設模型 `jev-latest`）
+  - **Microsoft Decision 1.1 (Foundry)**：填入 Microsoft Foundry 資源端點、部署名稱與 API Key，預設經由 Proxy 呼叫。詳見 [Microsoft Decision 1.1](docs/providers/microsoft-decision.md)。
   - **Gemini Decisions API (`gemini-decision-1`)**：`https://generativelanguage.googleapis.com`（自動呼叫 `POST /v1beta/decisions`，以 `x-goog-api-key` 驗證；詳見下方「Gemini Decisions API 支援」）
 - **雙發送模式（Direct Mode / Proxy Mode）**：
   - **Direct Mode**：由瀏覽器直接發送 `fetch` 請求（適合測試本機已設定 `OLLAMA_ORIGINS` 的 Local Ollama）。
@@ -187,7 +188,7 @@ make cf-build
 
 本專案已完整配置 **Cloudflare Pages 靜態匯出 (`out/`) + Cloudflare Pages Functions (`functions/api/*`)**：
 
-- `functions/api/proxy.ts` 會自動部署為 Cloudflare Edge Worker `/api/proxy`，負責無狀態代理轉發雲端 `/v1/systemone` 與 Gemini `/v1beta/decisions` 請求。
+- `functions/api/proxy.ts` 會自動部署為 Cloudflare Edge Worker `/api/proxy`，負責無狀態代理轉發 SystemOne、Gemini Decisions 與 Microsoft Foundry 決策請求。
 - `functions/api/mock-systemone/v1/systemone.ts` 會自動部署為 `/api/mock-systemone/v1/systemone` 內建沙盒模擬端點。
 
 ```bash

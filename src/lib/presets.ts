@@ -5,6 +5,13 @@ import {
   GEMINI_DECISIONS_PROFILE_ID,
 } from './gemini-decisions';
 
+import {
+  FOUNDRY_BASE_URL_TEMPLATE,
+  MICROSOFT_DECISION_MODEL,
+  MICROSOFT_DECISION_NAME,
+  MICROSOFT_DECISION_PROFILE_ID,
+} from './microsoft-decision';
+
 export const DEFAULT_PROFILES: EndpointProfile[] = [
   {
     id: 'local-ollama-clef',
@@ -38,6 +45,14 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     cloudflareAccountId: '',
     apiKey: '',
     defaultModel: '@cf/cloudflare/clef',
+    useProxy: true,
+  },
+  {
+    id: MICROSOFT_DECISION_PROFILE_ID,
+    name: MICROSOFT_DECISION_NAME,
+    baseUrl: FOUNDRY_BASE_URL_TEMPLATE,
+    apiKey: '',
+    defaultModel: MICROSOFT_DECISION_MODEL,
     useProxy: true,
   },
   {
@@ -88,6 +103,11 @@ export const BASE_URL_TEMPLATES = [
     label: 'Cloudflare Workers AI',
     url: 'https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/clef',
     defaultModel: '@cf/cloudflare/clef',
+  },
+  {
+    label: MICROSOFT_DECISION_NAME,
+    url: FOUNDRY_BASE_URL_TEMPLATE,
+    defaultModel: MICROSOFT_DECISION_MODEL,
   },
   {
     label: 'Gemini Decisions API',

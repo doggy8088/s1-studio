@@ -10,6 +10,12 @@ import {
 } from '@/lib/presets';
 import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
+  FOUNDRY_BASE_URL_TEMPLATE,
+  FOUNDRY_DECISION_PATH,
+  MICROSOFT_DECISION_MODEL,
+  isMicrosoftDecisionProfile,
+} from '@/lib/microsoft-decision';
+import {
   buildGeminiDecisionsEndpoint,
   isGeminiDecisionsProfile,
 } from '@/lib/gemini-decisions';
@@ -112,10 +118,11 @@ export function ProfileManagerModal({
   const isCf = isCloudflareProfile(currentProfile);
   const isLocalOllama = isLocalOllamaProfile(currentProfile);
   const isGemini = isGeminiDecisionsProfile(currentProfile);
+  const isFoundry = isMicrosoftDecisionProfile(currentProfile);
   const cfAccountId = isCf ? extractCloudflareAccountId(currentProfile) : '';
 
   const canFetchRemoteModels = useMemo(() => {
-    if (isCf || isGemini) return false;
+    if (isCf || isGemini || isFoundry) return false;
     const url = currentProfile.baseUrl.trim();
     if (!url || url.startsWith('/api/')) return false;
     const isLocalhost =
@@ -124,7 +131,7 @@ export function ProfileManagerModal({
       currentProfile.apiKey && currentProfile.apiKey.trim().length > 0
     );
     return isLocalhost || hasKey;
-  }, [isCf, isGemini, currentProfile.baseUrl, currentProfile.apiKey]);
+  }, [isCf, isGemini, isFoundry, currentProfile.baseUrl, currentProfile.apiKey]);
 
   const loadModels = useCallback(
     async (profileToFetch: EndpointProfile, forceRefresh = false) => {
@@ -522,24 +529,34 @@ export function ProfileManagerModal({
             ) : (
               <div>
                 <div className="flex items-center justify-between">
-                  <label className="block text-sm font-semibold text-zinc-200">
-                    Base URL 端點根網址
+                  <label htmlFor="profile-base-url" className="block text-sm font-semibold text-zinc-200">
+                    {isFoundry ? 'Foundry 資源端點' : 'Base URL 端點根網址'}
                   </label>
                   <span className="font-mono text-xs text-zinc-400">
                     {isGemini
                       ? '自動附加 /v1beta/decisions'
-                      : '自動附加 /v1/systemone'}
+                      : isFoundry
+                        ? `自動附加 ${FOUNDRY_DECISION_PATH}`
+                        : '自動附加 /v1/systemone'}
                   </span>
                 </div>
                 <input
+                  id="profile-base-url"
                   type="text"
+                  required={isFoundry}
+                  aria-describedby={isFoundry ? 'foundry-endpoint-help' : undefined}
                   value={currentProfile.baseUrl}
                   onChange={(e) =>
                     handleUpdateCurrent({ baseUrl: e.target.value })
                   }
-                  placeholder="http://localhost:11434"
+                  placeholder={isFoundry ? FOUNDRY_BASE_URL_TEMPLATE : 'http://localhost:11434'}
                   className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
+                {isFoundry && (
+                  <p id="foundry-endpoint-help" className="mt-2 text-xs text-zinc-400">
+                    從 Microsoft Foundry 部署詳細資料複製資源端點、部署名稱和 API Key。
+                  </p>
+                )}
                 {isGemini && (
                   <div className="mt-2 rounded-lg border border-[#232732] bg-[#090a0d] px-3 py-2 font-mono text-xs break-all text-zinc-400">
                     <span className="text-zinc-500">實際呼叫端點：</span>{' '}
@@ -593,17 +610,19 @@ export function ProfileManagerModal({
 
             {/* 3. API Key (placed BEFORE Model Name as requested) */}
             <div>
-              <label className="block text-sm font-semibold text-zinc-200">
-                API Key 金鑰（選填，僅儲存於本機瀏覽器 LocalStorage）
+              <label htmlFor="profile-api-key" className="block text-sm font-semibold text-zinc-200">
+                {isFoundry ? 'Foundry 資源 API Key（執行時必填，儲存於本機瀏覽器）' : 'API Key 金鑰（選填，僅儲存於本機瀏覽器 LocalStorage）'}
               </label>
               <div className="relative mt-1.5">
                 <input
+                  id="profile-api-key"
                   type={showKey ? 'text' : 'password'}
+                  required={isFoundry}
                   value={currentProfile.apiKey}
                   onChange={(e) =>
                     handleUpdateCurrent({ apiKey: e.target.value })
                   }
-                  placeholder={`${isGemini ? 'AIza...' : 'sk-...'} 或留空（複製 cURL 時預設使用 $${getProfileApiKeyEnvVar(currentProfile)}）`}
+                  placeholder={isFoundry ? 'Azure API Key' : `${isGemini ? 'AIza...' : 'sk-...'} 或留空（複製 cURL 時預設使用 $${getProfileApiKeyEnvVar(currentProfile)}）`}
                   className="w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] py-2.5 pr-10 pl-3.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
                 <button
@@ -624,8 +643,8 @@ export function ProfileManagerModal({
             {/* 4. Model Name (placed AFTER API Key, with dynamic /models discovery for clef/jev) */}
             <div>
               <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-zinc-200">
-                  Model Name 預設模型名稱
+                <label htmlFor="profile-model" className="block text-sm font-semibold text-zinc-200">
+                  {isFoundry ? 'Deployment Name 部署名稱（必填）' : 'Model Name 預設模型名稱'}
                 </label>
                 {canFetchRemoteModels && (
                   <button
@@ -652,8 +671,9 @@ export function ProfileManagerModal({
                   </button>
                 )}
               </div>
-              {isEndpointAndKeyValid ? (
+              {isEndpointAndKeyValid && !isFoundry ? (
                 <select
+                  id="profile-model"
                   value={currentProfile.defaultModel}
                   onChange={(e) =>
                     handleUpdateCurrent({ defaultModel: e.target.value })
@@ -1012,7 +1032,9 @@ export function ProfileManagerModal({
               ) : (
                 <>
                   <input
+                    id="profile-model"
                     type="text"
+                    required={isFoundry}
                     value={currentProfile.defaultModel}
                     onChange={(e) =>
                       handleUpdateCurrent({ defaultModel: e.target.value })
@@ -1020,7 +1042,9 @@ export function ProfileManagerModal({
                     placeholder={
                       isCf
                         ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
-                        : 'clef:27b / clef / jev-latest'
+                        : isFoundry
+                          ? MICROSOFT_DECISION_MODEL
+                          : 'clef:27b / clef / jev-latest'
                     }
                     className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                   />

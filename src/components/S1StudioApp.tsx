@@ -56,6 +56,7 @@ import {
   validateQuestionsBuilder,
   getScoreLevelLimitForProfile,
 } from '@/lib/s1-utils';
+import { isMicrosoftDecisionProfile } from '@/lib/microsoft-decision';
 import { isGeminiDecisionsProfile } from '@/lib/gemini-decisions';
 import {
   generateCurlSnippet,
@@ -560,6 +561,7 @@ export function S1StudioApp() {
 
   const activeLocalOllamaDiag = localOllamaDiagByProfile[activeProfile.id];
 
+  const isActiveFoundry = isMicrosoftDecisionProfile(activeProfile);
   const isActiveEndpointAndKeyValid = useMemo(
     () => isProfileEndpointAndKeyValid(activeProfile, activeDiscoveredModels),
     [activeProfile, activeDiscoveredModels]
@@ -607,7 +609,8 @@ export function S1StudioApp() {
       !url ||
       url.startsWith('/api/') ||
       isCloudflareProfile(activeProfile) ||
-      isGeminiDecisionsProfile(activeProfile)
+      isGeminiDecisionsProfile(activeProfile) ||
+      isMicrosoftDecisionProfile(activeProfile)
     ) {
       return;
     }
@@ -1037,11 +1040,12 @@ export function S1StudioApp() {
               <div className="h-4 w-px bg-[#252934]" />
 
               {/* Inline Model selector: dropdown (<select>) when Endpoint & API Key are valid, otherwise input */}
-              <span className="text-xs font-semibold text-zinc-400">
-                Model:
-              </span>
-              {isActiveEndpointAndKeyValid ? (
+              <label htmlFor="active-profile-model" className="text-xs font-semibold text-zinc-400">
+                {isActiveFoundry ? 'Deployment:' : 'Model:'}
+              </label>
+              {isActiveEndpointAndKeyValid && !isActiveFoundry ? (
                 <select
+                  id="active-profile-model"
                   value={activeProfile.defaultModel}
                   onChange={(e) =>
                     updateActiveProfileInline({ defaultModel: e.target.value })
@@ -1142,6 +1146,7 @@ export function S1StudioApp() {
                 <>
                   <input
                     type="text"
+                    id="active-profile-model"
                     list="s1-models-datalist"
                     value={activeProfile.defaultModel}
                     onChange={(e) =>
@@ -1149,8 +1154,8 @@ export function S1StudioApp() {
                         defaultModel: e.target.value,
                       })
                     }
-                    placeholder="@cf/cloudflare/clef / clef:27b"
-                    title="當前模型名稱 (Model Name)"
+                    placeholder={isActiveFoundry ? 'Microsoft-Decision-1.1' : '@cf/cloudflare/clef / clef:27b'}
+                    title={isActiveFoundry ? 'Foundry 部署名稱' : '當前模型名稱 (Model Name)'}
                     className={`${
                       isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'
                     } rounded-lg border border-[#282d3a] bg-[#14171f] px-2.5 py-1 font-mono text-sm font-medium text-amber-300 focus:border-amber-500 focus:outline-none`}

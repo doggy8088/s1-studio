@@ -1,3 +1,8 @@
+import {
+  FOUNDRY_API_KEY_HEADER,
+  resolveFoundryDecisionEndpoint,
+} from '../../../lib/microsoft-decision';
+
 import { NextRequest, NextResponse } from 'next/server';
 
 const TYPESAFE_IMAGES_HEADER = 'TypeSafe-Danger-Zone-Images';
@@ -156,13 +161,16 @@ export async function POST(req: NextRequest) {
     const isGeminiTarget = isGeminiApiHost(cleanedBase);
 
     // Normalize URL and ensure /v1/systemone path (unless Cloudflare Workers AI /ai/run/ or Gemini endpoint)
+    const foundryEndpoint = resolveFoundryDecisionEndpoint(cleanedBase);
+    const foundryKey = req.headers.get(FOUNDRY_API_KEY_HEADER)?.trim();
     const targetEndpoint = isGeminiTarget
       ? resolveGeminiDecisionsEndpoint(cleanedBase)
-      : /\/v1\/systemone$/i.test(cleanedBase) || cleanedBase.includes('/ai/run/')
-        ? cleanedBase
-        : /\/v1$/i.test(cleanedBase)
-          ? `${cleanedBase}/systemone`
-          : `${cleanedBase}/v1/systemone`;
+      : foundryEndpoint ??
+        (/\/v1\/systemone$/i.test(cleanedBase) || cleanedBase.includes('/ai/run/')
+          ? cleanedBase
+          : /\/v1$/i.test(cleanedBase)
+            ? `${cleanedBase}/systemone`
+            : `${cleanedBase}/v1/systemone`);
 
     // Validate URL protocol
     let parsedUrl: URL;
@@ -196,6 +204,8 @@ export async function POST(req: NextRequest) {
       if (geminiKey) {
         forwardHeaders['x-goog-api-key'] = geminiKey;
       }
+    } else if (foundryEndpoint && foundryKey) {
+      forwardHeaders[FOUNDRY_API_KEY_HEADER] = foundryKey;
     } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
     }
@@ -211,6 +221,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: forwardHeaders,
       body: bodyText,
+      ...(foundryEndpoint ? { redirect: 'error' } : {}),
     });
     const latencyMs = Math.round(performance.now() - startTime);
 

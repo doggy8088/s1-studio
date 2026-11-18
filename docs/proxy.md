@@ -13,6 +13,7 @@
 | 本機 Ollama（`localhost:11434`） | Direct | Cloudflare 上的 Proxy 連不到使用者電腦；請改設定 `OLLAMA_ORIGINS` |
 | Ollama Cloud、TypeSafe AI | Proxy | 這些 API 未必允許瀏覽器跨網域呼叫 |
 | Cloudflare Workers AI | Proxy | Cloudflare REST API 不提供瀏覽器 CORS |
+| Microsoft Foundry | Proxy（預設）或 Direct | 以 `api-key` 呼叫 Microsoft 決策端點 |
 | Gemini Decisions API | Direct（預設）或 Proxy | Gemini API 的 CORS 預檢會回傳 `access-control-allow-origin` 與 `x-goog-api-key`，瀏覽器可直接呼叫 |
 | 內建模擬器 | 不適用 | 同網域的 `/api/...` 路徑，永遠直接呼叫 |
 
@@ -25,6 +26,7 @@
 | `x-s1-target-url` | 是 | 目標網址（根網址或完整端點） |
 | `x-s1-proxy-action` | 否 | 省略時轉送決策請求；`models` 探索模型；`ollama-pull` 拉取 Ollama 模型 |
 | `Authorization` | 否 | `Bearer <API Key>`，依目標轉成對應的驗證方式 |
+| `api-key` | 否 | Microsoft Foundry 資源 API Key，只轉送到 Foundry 決策端點 |
 | `x-goog-api-key` | 否 | 直接指定 Gemini API Key，優先於 `Authorization` |
 | `TypeSafe-Danger-Zone-Images` | 否 | TypeSafe AI 圖片功能的啟用標頭，有值時原樣轉送給上游（v0.1.20 起） |
 | `Content-Type` | 是 | `application/json` |
@@ -37,12 +39,13 @@
 
 | `x-s1-target-url` | 實際轉送網址 | 轉送的驗證標頭 |
 | --- | --- | --- |
+| Microsoft Foundry 資源根網址或完整決策端點 | `/providers/microsoft/v1/systemone` | `api-key` |
 | 主機為 `generativelanguage.googleapis.com` | 結尾為 `/v1beta/decisions` 時照用；結尾為 `/v1beta` 時加上 `/decisions`；其餘一律改為 `https://generativelanguage.googleapis.com/v1beta/decisions` | `x-goog-api-key`（取自 `x-goog-api-key` 或去掉 `Bearer ` 的 `Authorization`），**不送** `Authorization` |
 | 結尾為 `/v1/systemone` 或含 `/ai/run/` | 照用 | `Authorization` |
 | 結尾為 `/v1` | 在後面加上 `/systemone`（v0.1.21 起，不會再組出 `/v1/v1/systemone`） | `Authorization` |
 | 其他 | 在後面加上 `/v1/systemone` | `Authorization` |
 
-前端直連模式用同一套規則組網址（`appendSystemOnePath()`，位於 [`src/lib/s1-utils.ts`](../src/lib/s1-utils.ts)）。
+前端直連模式用同一套規則組網址（`formatEndpointPreviewUrl()`，位於 [`src/lib/s1-utils.ts`](../src/lib/s1-utils.ts)）。
 
 回應會保留上游的狀態碼、`Content-Type` 與本文，並加上 `X-S1-Upstream-Latency` 標頭（毫秒）。前端會優先用這個值當作延遲時間，避免把 Proxy 本身的往返時間算進去。
 
@@ -50,7 +53,7 @@
 
 依序嘗試 `{root}/v1/models`、`{root}/models`、`{root}/api/tags`，只保留名稱含 `clef` 或 `jev` 的模型，回傳 `{ "models": [...] }`。`{root}` 是去掉 `/v1/systemone` 或 `/v1` 的根網址。
 
-Gemini 與 Cloudflare 的模型清單是固定的，前端不會對它們呼叫這個動作。
+Gemini 與 Cloudflare 使用固定模型清單，Microsoft Foundry 使用手動輸入的部署名稱。
 
 ## 動作：`ollama-pull`
 
@@ -61,11 +64,11 @@ Gemini 與 Cloudflare 的模型清單是固定的，前端不會對它們呼叫�
 | 項目 | Next.js（本機） | Cloudflare Pages Function |
 | --- | --- | --- |
 | `localhost`、`127.0.0.1` 目標 | 允許 | 拒絕並回傳 400（Edge 連不到使用者電腦） |
-| CORS 預檢（`OPTIONS`） | 不需要（同網域） | `onRequestOptions` 回傳 `Access-Control-Allow-Headers: Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, TypeSafe-Danger-Zone-Images` |
+| CORS 預檢（`OPTIONS`） | 不需要（同網域） | `onRequestOptions` 回傳 `Access-Control-Allow-Headers: Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, api-key, TypeSafe-Danger-Zone-Images` |
 | 回應 CORS 標頭 | 無 | `Access-Control-Allow-Origin: *` |
 | 延遲量測 | `performance.now()` | `Date.now()`（最少 1 毫秒） |
 
-Gemini 相關的三個輔助函式（`isGeminiApiHost`、`resolveGeminiDecisionsEndpoint`、`extractGeminiApiKey`）在兩個檔案中內容完全相同。Pages Function 不能 import `src/` 的程式碼，所以只能各放一份，修改時務必兩邊一起改。
+Gemini 相關的三個輔助函式（`isGeminiApiHost`、`resolveGeminiDecisionsEndpoint`、`extractGeminiApiKey`）在兩個檔案中內容完全相同。兩種 Proxy 共用 Microsoft Foundry 的端點解析函式。
 
 ## 安全性
 

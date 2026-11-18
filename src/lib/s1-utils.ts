@@ -25,6 +25,16 @@ import {
   typeSafeRequestHeaders,
   validateTypeSafeImages,
 } from './typesafe';
+import {
+  FOUNDRY_API_KEY_ENV_VAR,
+  FOUNDRY_API_KEY_HEADER,
+  FOUNDRY_BASE_URL_TEMPLATE,
+  MICROSOFT_DECISION_MODEL,
+  isMicrosoftDecisionProfile,
+  resolveFoundryDecisionEndpoint,
+  toMicrosoftDecisionRequest,
+  validateMicrosoftDecisionImages,
+} from './microsoft-decision';
 
 export { isTypeSafeProfile } from './typesafe';
 
@@ -183,7 +193,7 @@ export function formatEndpointPreviewUrl(
       (match && match[1] ? match[1].trim() : '$CLOUDFLARE_ACCOUNT_ID');
     return buildCloudflareEndpointUrl(resolvedAccount, model);
   }
-  return appendSystemOnePath(clean);
+  return resolveFoundryDecisionEndpoint(clean) ?? appendSystemOnePath(clean);
 }
 
 /**
@@ -324,6 +334,12 @@ export function isProfileEndpointAndKeyValid(
   ) {
     return true;
   }
+  if (isMicrosoftDecisionProfile(profile)) {
+    const endpoint = resolveFoundryDecisionEndpoint(profile.baseUrl);
+    return Boolean(
+      endpoint && !endpoint.startsWith(FOUNDRY_BASE_URL_TEMPLATE + '/') && profile.apiKey.trim()
+    );
+  }
   if (isGeminiDecisionsProfile(profile)) {
     return Boolean(profile.apiKey && profile.apiKey.trim().length > 0);
   }
@@ -346,6 +362,9 @@ export function isProfileEndpointAndKeyValid(
  * Get the built-in fallback models for a given profile before `/models` discovery
  */
 export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
+  if (isMicrosoftDecisionProfile(profile)) {
+    return [MICROSOFT_DECISION_MODEL];
+  }
   if (isGeminiDecisionsProfile(profile)) {
     return [...GEMINI_DECISIONS_MODELS];
   }
@@ -608,6 +627,9 @@ export async function fetchModelsForProfile(
   profile: EndpointProfile,
   options?: { forceRefresh?: boolean }
 ): Promise<string[]> {
+  if (isMicrosoftDecisionProfile(profile)) {
+    return getSelectableModelsForProfile(profile);
+  }
   if (isGeminiDecisionsProfile(profile)) {
     return [...GEMINI_DECISIONS_MODELS];
   }
@@ -1282,13 +1304,39 @@ export async function executeSystemOneRequest(
   if (isGeminiDecisionsProfile(profile)) {
     return executeGeminiDecisionsRequest(profile, payload, overrideModel);
   }
-  const isCf = isCloudflareProfile(profile);
+  const isFoundry = isMicrosoftDecisionProfile(profile);
+  const foundryEndpoint = isFoundry ? resolveFoundryDecisionEndpoint(profile.baseUrl) : undefined;
+  const isCf = !isFoundry && isCloudflareProfile(profile);
   const rawModelToUse = stripLocalOllamaStatusSuffix(
     overrideModel ?? payload.model ?? profile.defaultModel
   );
   const modelToUse = isCf
     ? normalizeCloudflareModelId(rawModelToUse)
-    : rawModelToUse;
+    : isFoundry
+      ? rawModelToUse.trim()
+      : rawModelToUse;
+
+  if (isFoundry) {
+    const error = !foundryEndpoint || foundryEndpoint.startsWith(FOUNDRY_BASE_URL_TEMPLATE + '/')
+      ? '請在「端點與金鑰設定」填入 Microsoft Foundry 資源端點。'
+      : !profile.apiKey.trim()
+        ? `請填入 Microsoft Foundry 資源的 ${FOUNDRY_API_KEY_ENV_VAR}。`
+        : !modelToUse
+          ? '請填入 Microsoft Foundry 的部署名稱。'
+          : validateMicrosoftDecisionImages(payload.images);
+    if (error) {
+      return {
+        profileId: profile.id,
+        profileName: profile.name,
+        model: modelToUse || '(default)',
+        status: 400,
+        statusText: 'Invalid Foundry Request',
+        latencyMs: 0,
+        error,
+        timestamp: Date.now(),
+      };
+    }
+  }
 
   const finalPayload: S1RequestPayload = {
     ...payload,
@@ -1310,7 +1358,7 @@ export async function executeSystemOneRequest(
 
   const baseUrlClean = profile.baseUrl.trim().replace(/\/+$/, '');
   const isInternalMock = baseUrlClean.startsWith('/api/');
-  const isTypeSafe = !isCf && isTypeSafeProfile(profile);
+  const isTypeSafe = !isFoundry && !isCf && isTypeSafeProfile(profile);
   const isBuiltinSimulator =
     isInternalMock ||
     profile.id === 's1-builtin-simulator' ||
@@ -1332,9 +1380,13 @@ export async function executeSystemOneRequest(
     }
   }
   // TypeSafe sends images as `assets` + references (https://docs.typesafe.ai/images).
-  const wireBody = isTypeSafe ? toTypeSafeRequest(finalPayload) : finalPayload;
+  const wireBody = isFoundry
+    ? toMicrosoftDecisionRequest(finalPayload)
+    : isTypeSafe
+      ? toTypeSafeRequest(finalPayload)
+      : finalPayload;
 
-  const targetEndpoint = isCf
+  const targetEndpoint = foundryEndpoint ?? (isCf
     ? buildCloudflareEndpointUrl(
         extractCloudflareAccountId(profile),
         modelToUse
@@ -1343,7 +1395,7 @@ export async function executeSystemOneRequest(
         baseUrlClean,
         modelToUse,
         profile.cloudflareAccountId
-      );
+      ));
 
   if (targetEndpoint.includes('$CLOUDFLARE_ACCOUNT_ID')) {
     return {
@@ -1364,7 +1416,9 @@ export async function executeSystemOneRequest(
     Accept: 'application/json',
   };
 
-  if (profile.apiKey && profile.apiKey.trim().length > 0) {
+  if (isFoundry) {
+    headers[FOUNDRY_API_KEY_HEADER] = profile.apiKey.trim();
+  } else if (profile.apiKey && profile.apiKey.trim().length > 0) {
     headers['Authorization'] = `Bearer ${profile.apiKey.trim()}`;
   }
   if (isTypeSafe) {
@@ -1388,6 +1442,7 @@ export async function executeSystemOneRequest(
         method: 'POST',
         headers,
         body: JSON.stringify(wireBody),
+        ...(isFoundry ? { redirect: 'error' } : {}),
       });
     }
 
@@ -1417,6 +1472,7 @@ export async function executeSystemOneRequest(
         errorMsg =
           cfError ||
           parsed?.error?.message ||
+          (isFoundry ? parsed?.message : undefined) ||
           parsed?.error ||
           parsed?.message ||
           `HTTP ${response.status}: ${response.statusText}`;

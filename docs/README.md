@@ -42,6 +42,7 @@
 - [Cloudflare Workers AI](providers/cloudflare-workers-ai.md)
 - [TypeSafe AI](providers/typesafe-ai.md)
 - [Gemini Decisions API](providers/gemini-decisions-api.md)
+- [Microsoft Decision 1.1 (Foundry)](providers/microsoft-decision.md)
 - [內建沙盒模擬器](providers/builtin-simulator.md)
 
 ### 格式差異

@@ -72,6 +72,29 @@ for (const rt of runtimes) {
       );
     });
 
+    test('Foundry resource and full endpoint forward api-key to the decision API', async () => {
+      const resource = 'https://example.services.ai.azure.com';
+      const endpoint = resource + '/providers/microsoft/v1/systemone';
+      for (const target of [resource, endpoint]) {
+        const req = proxyRequest(target);
+        req.headers.set('api-key', 'azure-test-key');
+        expect((await rt.call(req)).status).toBe(200);
+        const upstream = calls.at(-1);
+        expect(upstream?.url).toBe(endpoint);
+        expect(upstream?.init.redirect).toBe('error');
+        const headers = new Headers(upstream?.init.headers);
+        expect(headers.get('api-key')).toBe('azure-test-key');
+        expect(headers.has('Authorization')).toBe(false);
+      }
+    });
+
+    test('Foundry api-key is not forwarded to other SystemOne destinations', async () => {
+      const req = proxyRequest('https://example.services.ai.azure.com.example/v1/systemone');
+      req.headers.set('api-key', 'azure-test-key');
+      await rt.call(req);
+      expect(new Headers(calls[0].init.headers).has('api-key')).toBe(false);
+    });
+
     test('SystemOne base URL ending in /v1 does not double the /v1 segment', async () => {
       await rt.call(proxyRequest('https://api.typesafe.ai/v1'));
       expect(calls[0].url).toBe('https://api.typesafe.ai/v1/systemone');
@@ -110,9 +133,10 @@ for (const rt of runtimes) {
   });
 }
 
-test('Cloudflare proxy CORS preflight allows x-goog-api-key and TypeSafe image header', async () => {
+test('Cloudflare proxy CORS preflight allows Gemini, Foundry, and TypeSafe headers', async () => {
   const res = await cfProxyOptions();
   const allowed = res.headers.get('Access-Control-Allow-Headers');
   expect(allowed).toContain('x-goog-api-key');
+  expect(allowed?.split(', ')).toContain('api-key');
   expect(allowed).toContain('TypeSafe-Danger-Zone-Images');
 });

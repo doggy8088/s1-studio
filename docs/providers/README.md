@@ -1,6 +1,6 @@
 # 提供者總覽
 
-S1 Studio 支援五種決策 API 提供者，外加一個內建模擬器。本頁比較各家的端點、驗證、格式與限制；細節請見各提供者文件。
+S1 Studio 支援六種決策 API 提供者，外加一個內建模擬器。本頁比較各家的端點、驗證、格式與限制；細節請見各提供者文件。
 
 - **資料查證日期**：2026-11-13（依各家官方文件；標示「實測」的項目為實際呼叫結果）
 
@@ -10,6 +10,7 @@ S1 Studio 支援五種決策 API 提供者，外加一個內建模擬器。本�
 | Cloudflare Workers AI | [cloudflare-workers-ai.md](cloudflare-workers-ai.md) | SystemOne（v4 REST 外層） |
 | TypeSafe AI | [typesafe-ai.md](typesafe-ai.md) | SystemOne |
 | Gemini Decisions API | [gemini-decisions-api.md](gemini-decisions-api.md) | Gemini Decisions（格式不同，需轉換） |
+| Microsoft Decision 1.1 (Foundry) | [microsoft-decision.md](microsoft-decision.md) | SystemOne（圖片使用 `assets`） |
 | 內建沙盒模擬器 | [builtin-simulator.md](builtin-simulator.md) | SystemOne（模擬） |
 
 ## 端點與驗證
@@ -21,6 +22,7 @@ S1 Studio 支援五種決策 API 提供者，外加一個內建模擬器。本�
 | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/{id}/ai/run/@cf/cloudflare/{model}` | `Authorization: Bearer` | `CLOUDFLARE_API_KEY`（S1 Studio 匯出用名稱） | Proxy |
 | TypeSafe AI | `https://api.typesafe.ai/v1/systemone` | `Authorization: Bearer` | `TYPESAFE_API_KEY` | Proxy |
 | Gemini Decisions API | `https://generativelanguage.googleapis.com/v1beta/decisions` | `x-goog-api-key` | `GEMINI_API_KEY` | Direct |
+| Microsoft Foundry | `https://{resource}.services.ai.azure.com/providers/microsoft/v1/systemone` | `api-key` | `AZURE_API_KEY` | Proxy |
 | 內建模擬器 | `/api/mock-systemone/v1/systemone` | 不需要 | — | Direct（同網域） |
 
 ## 模型
@@ -31,6 +33,7 @@ S1 Studio 支援五種決策 API 提供者，外加一個內建模擬器。本�
 | Cloudflare | `@cf/cloudflare/clef`、`clef-omni`、`clef-flash` | 固定清單 |
 | TypeSafe AI | `jev-latest`、`jev-preview`、`jev-1.14.0`、`jev-1.13.0` | 查詢 `/v1/models` 等端點後快取 |
 | Gemini | `gemini-decision-1` | 固定清單 |
+| Microsoft Foundry | `Microsoft-Decision-1.1` | 手動填入 Foundry 的部署名稱 |
 | 內建模擬器 | `clef-simulator-1.0`（標籤） | 固定清單 |
 
 ## 請求格式

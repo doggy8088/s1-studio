@@ -1,3 +1,8 @@
+import {
+  FOUNDRY_API_KEY_HEADER,
+  resolveFoundryDecisionEndpoint,
+} from '../../src/lib/microsoft-decision';
+
 /**
  * Cloudflare Pages Function: Stateless CORS Proxy for /v1/systemone and /models discovery
  * Automatically mounted at POST /api/proxy on Cloudflare Pages.
@@ -67,7 +72,7 @@ export const onRequestOptions = async () => {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers':
-        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, TypeSafe-Danger-Zone-Images',
+        'Content-Type, Authorization, x-s1-target-url, x-s1-proxy-action, x-goog-api-key, api-key, TypeSafe-Danger-Zone-Images',
     },
   });
 };
@@ -198,13 +203,16 @@ export const onRequestPost = async (context: { request: Request }) => {
     // Gemini Decisions API: POST /v1beta/decisions with x-goog-api-key auth
     const isGeminiTarget = isGeminiApiHost(cleanedBase);
 
+    const foundryEndpoint = resolveFoundryDecisionEndpoint(cleanedBase);
+    const foundryKey = request.headers.get(FOUNDRY_API_KEY_HEADER)?.trim();
     const targetEndpoint = isGeminiTarget
       ? resolveGeminiDecisionsEndpoint(cleanedBase)
-      : /\/v1\/systemone$/i.test(cleanedBase) || cleanedBase.includes('/ai/run/')
-        ? cleanedBase
-        : /\/v1$/i.test(cleanedBase)
-          ? `${cleanedBase}/systemone`
-          : `${cleanedBase}/v1/systemone`;
+      : foundryEndpoint ??
+        (/\/v1\/systemone$/i.test(cleanedBase) || cleanedBase.includes('/ai/run/')
+          ? cleanedBase
+          : /\/v1$/i.test(cleanedBase)
+            ? `${cleanedBase}/systemone`
+            : `${cleanedBase}/v1/systemone`);
 
     let parsedUrl: URL;
     try {
@@ -252,6 +260,8 @@ export const onRequestPost = async (context: { request: Request }) => {
       if (geminiKey) {
         forwardHeaders['x-goog-api-key'] = geminiKey;
       }
+    } else if (foundryEndpoint && foundryKey) {
+      forwardHeaders[FOUNDRY_API_KEY_HEADER] = foundryKey;
     } else if (authHeader && authHeader.trim().length > 0) {
       forwardHeaders['Authorization'] = authHeader;
     }
@@ -267,6 +277,7 @@ export const onRequestPost = async (context: { request: Request }) => {
       method: 'POST',
       headers: forwardHeaders,
       body: bodyText,
+      ...(foundryEndpoint ? { redirect: 'error' } : {}),
     });
     const latencyMs = Math.max(1, Date.now() - startTime);
 

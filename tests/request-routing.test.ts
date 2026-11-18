@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EndpointProfile, S1RequestPayload } from '@/types/systemone';
+import { MICROSOFT_DECISION_PROFILE_ID } from '@/lib/microsoft-decision';
 import { DEFAULT_PROFILES } from '@/lib/presets';
 import { executeSystemOneRequest } from '@/lib/s1-utils';
 import {
@@ -129,6 +130,83 @@ describe('executeSystemOneRequest → Gemini Decisions', () => {
       payload
     );
     expect(run.error).toBe('[INVALID_ARGUMENT] API key not valid.');
+  });
+});
+
+describe('Microsoft Decision 1.1 (Foundry)', () => {
+  const foundry = profile(MICROSOFT_DECISION_PROFILE_ID, {
+    baseUrl: 'https://example.services.ai.azure.com/',
+    defaultModel: 'Custom-Deployment',
+    apiKey: 'test-key',
+  });
+  const endpoint = 'https://example.services.ai.azure.com/providers/microsoft/v1/systemone';
+  const png = 'iVBORw0KGgo=';
+  const request: S1RequestPayload = {
+    state: { text: 'hello' },
+    images: [png],
+    questions: { severity: { type: 'score', instructions: 'How severe?', criteria: ['low', 'medium', 'high'] } },
+  };
+
+  test('proxy mode sends the deployment name and named image assets, then reads index scores', async () => {
+    nextResponse = () => Response.json({
+      model: 'microsoft-decision-1.1',
+      answers: { severity: { type: 'score', score: 1.4, confidence: 0.3 } },
+      usage: { input_tokens: 100, output_tokens: 1 },
+    });
+
+    const run = await executeSystemOneRequest(foundry, request);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('/api/proxy');
+    expect(headersOf(calls[0])['x-s1-target-url']).toBe(endpoint);
+    expect(headersOf(calls[0])['api-key']).toBe('test-key');
+    expect(headersOf(calls[0]).Authorization).toBeUndefined();
+    expect(bodyOf(calls[0])).toEqual({
+      model: 'Custom-Deployment',
+      state: { text: 'hello', images: ['image:s1-image-1'] },
+      questions: request.questions,
+      assets: { 's1-image-1': { type: 'image', format: 'png', data_base64: png } },
+    });
+    expect(run.response?.scores?.severity).toMatchObject({ score: 1.4, scoreScale: 'index' });
+    expect(run.response?.usage?.input_tokens).toBe(100);
+  });
+
+  test('direct mode preserves an explicit deployment override', async () => {
+    await executeSystemOneRequest({ ...foundry, useProxy: false, baseUrl: endpoint }, request, 'Another-Deployment');
+    expect(calls[0].url).toBe(endpoint);
+    expect(calls[0].init.redirect).toBe('error');
+    expect(bodyOf(calls[0]).model).toBe('Another-Deployment');
+  });
+
+  test('unconfigured profiles and unsupported images fail before fetch', async () => {
+    const cases: [EndpointProfile, S1RequestPayload][] = [
+      [profile(MICROSOFT_DECISION_PROFILE_ID, { apiKey: 'test-key' }), request],
+      [{ ...foundry, baseUrl: 'https://example.invalid' }, request],
+      [{ ...foundry, apiKey: '' }, request],
+      [{ ...foundry, defaultModel: '' }, request],
+      [foundry, { ...request, images: ['UklGRgAAAABXRUJQ'] }],
+    ];
+    for (const [config, input] of cases) {
+      const run = await executeSystemOneRequest(config, input);
+      expect(run.status).toBe(400);
+      expect(run.error).toBeTruthy();
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  test('code exports use the same endpoint, deployment, assets, and API key variable', () => {
+    const options = { includeRawApiKey: false };
+    const snippets = [
+      generateCurlSnippet(foundry, request, options),
+      generatePythonSnippet(foundry, request, options),
+      generateTypeScriptSnippet(foundry, request, options, 'fetch'),
+    ];
+    for (const snippet of snippets) {
+      for (const value of [endpoint, 'Custom-Deployment', 'image:s1-image-1', 'api-key', 'AZURE_API_KEY']) {
+        expect(snippet).toContain(value);
+      }
+      expect(snippet).not.toContain('test-key');
+      expect(snippet).not.toContain('Authorization');
+    }
   });
 });
 

@@ -22,6 +22,16 @@ import {
   typeSafeRequestHeaders,
   validateTypeSafeImages,
 } from './typesafe';
+import {
+  FOUNDRY_API_KEY_ENV_VAR,
+  FOUNDRY_API_KEY_HEADER,
+  FOUNDRY_BASE_URL_TEMPLATE,
+  FOUNDRY_DECISION_PATH,
+  isMicrosoftDecisionProfile,
+  resolveFoundryDecisionEndpoint,
+  toMicrosoftDecisionRequest,
+  validateMicrosoftDecisionImages,
+} from './microsoft-decision';
 
 export interface CodeGenOptions {
   includeRawApiKey: boolean;
@@ -41,6 +51,9 @@ export function getProfileApiKeyEnvVar(profile: EndpointProfile): string {
   const name = (profile.name || '').toLowerCase();
   const url = (profile.baseUrl || '').toLowerCase();
 
+  if (isMicrosoftDecisionProfile(profile)) {
+    return FOUNDRY_API_KEY_ENV_VAR;
+  }
   if (name.includes('llmshare') || url.includes('llmshare')) {
     return 'LLMSHARE_API_KEY';
   }
@@ -97,6 +110,17 @@ export function getEndpointUrl(
   return formatEndpointPreviewUrl(clean, model, cloudflareAccountId);
 }
 
+function getSnippetEndpoint(profile: EndpointProfile, model?: string): string {
+  if (isMicrosoftDecisionProfile(profile)) {
+    return resolveFoundryDecisionEndpoint(profile.baseUrl) ??
+      FOUNDRY_BASE_URL_TEMPLATE + FOUNDRY_DECISION_PATH;
+  }
+  if (isCloudflareProfile(profile)) {
+    return buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), model);
+  }
+  return getEndpointUrl(profile.baseUrl, model, profile.cloudflareAccountId);
+}
+
 /** Readable, deterministic image references for exported snippets. */
 const snippetAssetRef = (index: number) => `<s1-image-${index + 1}>`;
 
@@ -111,6 +135,13 @@ function normalizePayloadForProfile(
   const rawModel = stripLocalOllamaStatusSuffix(
     payload.model || profile.defaultModel || ''
   );
+  if (isMicrosoftDecisionProfile(profile)) {
+    const deploymentName = rawModel.trim();
+    return toMicrosoftDecisionRequest({
+      ...payload,
+      ...(deploymentName ? { model: deploymentName } : {}),
+    });
+  }
   if (isCloudflareProfile(profile)) {
     return {
       ...payload,
@@ -128,16 +159,18 @@ function normalizePayloadForProfile(
 }
 
 /**
- * TypeSafe accepts PNG/JPEG only. The app blocks other formats before sending;
- * exported snippets carry the same message as a leading comment instead.
+ * Surface image format validation in exported snippets as a leading comment.
  */
-function typeSafeImageWarning(
+function imageWarning(
   profile: EndpointProfile,
   payload: S1RequestPayload,
   commentPrefix: '#' | '//'
 ): string {
-  if (!isTypeSafeSdkProfile(profile)) return '';
-  const err = validateTypeSafeImages(payload.images);
+  const err = isMicrosoftDecisionProfile(profile)
+    ? validateMicrosoftDecisionImages(payload.images)
+    : isTypeSafeSdkProfile(profile)
+      ? validateTypeSafeImages(payload.images)
+      : null;
   return err ? `${commentPrefix} 注意：${err}\n` : '';
 }
 
@@ -191,10 +224,7 @@ export function generateCurlSnippet(
   if (isGeminiDecisionsProfile(profile)) {
     return generateGeminiCurlSnippet(profile, payload, options);
   }
-  const modelToUse = payload.model || profile.defaultModel;
-  const endpoint = isCloudflareProfile(profile)
-    ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
-    : getEndpointUrl(profile.baseUrl, modelToUse, profile.cloudflareAccountId);
+  const endpoint = getSnippetEndpoint(profile, payload.model || profile.defaultModel);
   const normalizedPayload = normalizePayloadForProfile(profile, payload);
   const jsonPayload = JSON.stringify(normalizedPayload, null, 2);
   const escapedBody = jsonPayload.replace(/'/g, `'\\''`);
@@ -203,16 +233,19 @@ export function generateCurlSnippet(
   const hasRawKey = Boolean(profile.apiKey && profile.apiKey.trim());
   const includeAuth = shouldIncludeAuthInSnippet(profile);
 
+  const authPrefix = isMicrosoftDecisionProfile(profile)
+    ? `${FOUNDRY_API_KEY_HEADER}: `
+    : 'Authorization: Bearer ';
   const authHeaderLine = includeAuth
     ? options.includeRawApiKey && hasRawKey
-      ? `  -H "Authorization: Bearer ${profile.apiKey.trim()}" \\\n`
-      : `  -H "Authorization: Bearer $${envVarName}" \\\n`
+      ? `  -H "${authPrefix}${profile.apiKey.trim()}" \\\n`
+      : `  -H "${authPrefix}$${envVarName}" \\\n`
     : '';
   const extraHeaderLines = Object.entries(extraSnippetHeaders(profile, payload))
     .map(([k, v]) => `  -H "${k}: ${v}" \\\n`)
     .join('');
 
-  return `${typeSafeImageWarning(profile, payload, '#')}curl -s -X POST "${endpoint}" \\
+  return `${imageWarning(profile, payload, '#')}curl -s -X POST "${endpoint}" \\
   -H "Content-Type: application/json" \\
 ${authHeaderLine}${extraHeaderLines}  -d '${escapedBody}' | jq`;
 }
@@ -231,9 +264,9 @@ export function generatePythonSnippet(
     return generateGeminiPythonSnippet(profile, payload, options);
   }
   if (isTypeSafeSdkProfile(profile)) {
-    return `${typeSafeImageWarning(profile, payload, '#')}${generateTypeSafePythonSnippet(profile, payload, options)}`;
+    return `${imageWarning(profile, payload, '#')}${generateTypeSafePythonSnippet(profile, payload, options)}`;
   }
-  return generateHttpPythonSnippet(profile, payload, options);
+  return `${imageWarning(profile, payload, '#')}${generateHttpPythonSnippet(profile, payload, options)}`;
 }
 
 function rawApiKey(profile: EndpointProfile, options: CodeGenOptions): string | undefined {
@@ -319,10 +352,7 @@ function generateHttpPythonSnippet(
   payload: S1RequestPayload,
   options: CodeGenOptions
 ): string {
-  const modelToUse = payload.model || profile.defaultModel;
-  const endpoint = isCloudflareProfile(profile)
-    ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
-    : getEndpointUrl(profile.baseUrl, modelToUse, profile.cloudflareAccountId);
+  const endpoint = getSnippetEndpoint(profile, payload.model || profile.defaultModel);
   const body = normalizePayloadForProfile(profile, payload);
   const includeAuth = shouldIncludeAuthInSnippet(profile);
   const rawKey = rawApiKey(profile, options);
@@ -352,9 +382,12 @@ function generateHttpPythonSnippet(
   const authLines = includeAuth
     ? `API_KEY = ${apiKeyExpr}\n`
     : '';
-  const authHeader = includeAuth
-    ? `if API_KEY:\n    headers["Authorization"] = f"Bearer {API_KEY}"\n`
-    : '';
+  const isFoundry = isMicrosoftDecisionProfile(profile);
+  const authAssignment = isFoundry
+    ? `headers["${FOUNDRY_API_KEY_HEADER}"] = API_KEY`
+    : 'headers["Authorization"] = f"Bearer {API_KEY}"';
+  const authHeader = includeAuth ? `if API_KEY:\n    ${authAssignment}\n` : '';
+  const requestOptions = isFoundry ? ', allow_redirects=False' : '';
 
   return `# pip install requests
 ${includeAuth && !rawKey ? 'import os\n\n' : ''}import requests
@@ -365,7 +398,7 @@ payload = ${toPythonLiteral(body)}
 
 headers = {"Content-Type": "application/json"}
 ${authHeader}
-response = requests.post(ENDPOINT, json=payload, headers=headers, timeout=60)
+response = requests.post(ENDPOINT, json=payload, headers=headers, timeout=60${requestOptions})
 response.raise_for_status()
 data = response.json()
 
@@ -391,12 +424,12 @@ export function generateTypeScriptSnippet(
   if (isGeminiDecisionsProfile(profile)) {
     return generateGeminiTypeScriptSnippet(profile, payload, options, variant);
   }
-  const warning = typeSafeImageWarning(profile, payload, '//');
+  const warning = imageWarning(profile, payload, '//');
   if (variant === 'sdk') {
     if (isTypeSafeSdkProfile(profile)) {
       return `${warning}${generateTypeSafeTypeScriptSnippet(profile, payload, options)}`;
     }
-    return `// 此端點沒有官方 TypeScript SDK，以下使用原生 fetch。\n${generateFetchTypeScriptSnippet(profile, payload, options)}`;
+    return `${warning}// 此端點沒有官方 TypeScript SDK，以下使用原生 fetch。\n${generateFetchTypeScriptSnippet(profile, payload, options)}`;
   }
   return `${warning}${generateFetchTypeScriptSnippet(profile, payload, options)}`;
 }
@@ -468,10 +501,7 @@ function generateFetchTypeScriptSnippet(
     ? `"${rawKey}"`
     : `process.env.${envVarName} ?? ""`;
 
-  const modelToUse = payload.model || profile.defaultModel;
-  const endpoint = isCloudflareProfile(profile)
-    ? buildCloudflareEndpointUrl(extractCloudflareAccountId(profile), modelToUse)
-    : getEndpointUrl(profile.baseUrl, modelToUse, profile.cloudflareAccountId);
+  const endpoint = getSnippetEndpoint(profile, payload.model || profile.defaultModel);
   const fetchPayloadStr = JSON.stringify(
     normalizePayloadForProfile(profile, payload),
     null,
@@ -480,6 +510,11 @@ function generateFetchTypeScriptSnippet(
   const extraHeaderLines = Object.entries(extraSnippetHeaders(profile, payload))
     .map(([k, v]) => `      "${k}": "${v}",\n`)
     .join('');
+  const isFoundry = isMicrosoftDecisionProfile(profile);
+  const authHeader = isFoundry
+    ? `{ "${FOUNDRY_API_KEY_HEADER}": API_KEY }`
+    : '{ Authorization: `Bearer ${API_KEY}` }';
+  const redirectOption = isFoundry ? '    redirect: "error",\n' : '';
   return `const ENDPOINT = "${endpoint}";
 const API_KEY = ${apiKeyExpr};
 
@@ -490,9 +525,9 @@ async function evaluateSystemOne() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-${extraHeaderLines}      ...(API_KEY ? { Authorization: \`Bearer \${API_KEY}\` } : {}),
+${extraHeaderLines}      ...(API_KEY ? ${authHeader} : {}),
     },
-    body: JSON.stringify(payload),
+${redirectOption}    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
