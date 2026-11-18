@@ -56,7 +56,7 @@ import {
   validateQuestionsBuilder,
   getScoreLevelLimitForProfile,
 } from '@/lib/s1-utils';
-import { isMicrosoftDecisionProfile } from '@/lib/microsoft-decision';
+import { FOUNDRY_DEFAULT_DEPLOYMENT_NAME, isMicrosoftDecisionProfile } from '@/lib/microsoft-decision';
 import { isGeminiDecisionsProfile } from '@/lib/gemini-decisions';
 import {
   generateCurlSnippet,
@@ -1154,7 +1154,7 @@ export function S1StudioApp() {
                         defaultModel: e.target.value,
                       })
                     }
-                    placeholder={isActiveFoundry ? 'Microsoft-Decision-1.1' : '@cf/cloudflare/clef / clef:27b'}
+                    placeholder={isActiveFoundry ? FOUNDRY_DEFAULT_DEPLOYMENT_NAME : '@cf/cloudflare/clef / clef:27b'}
                     title={isActiveFoundry ? 'Foundry 部署名稱' : '當前模型名稱 (Model Name)'}
                     className={`${
                       isCloudflareProfile(activeProfile) ? 'w-56' : 'w-36'

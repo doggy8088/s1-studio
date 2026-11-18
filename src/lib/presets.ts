@@ -7,7 +7,7 @@ import {
 
 import {
   FOUNDRY_BASE_URL_TEMPLATE,
-  MICROSOFT_DECISION_MODEL,
+  FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
   MICROSOFT_DECISION_NAME,
   MICROSOFT_DECISION_PROFILE_ID,
 } from './microsoft-decision';
@@ -52,7 +52,7 @@ export const DEFAULT_PROFILES: EndpointProfile[] = [
     name: MICROSOFT_DECISION_NAME,
     baseUrl: FOUNDRY_BASE_URL_TEMPLATE,
     apiKey: '',
-    defaultModel: MICROSOFT_DECISION_MODEL,
+    defaultModel: FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
     useProxy: true,
   },
   {
@@ -107,7 +107,7 @@ export const BASE_URL_TEMPLATES = [
   {
     label: MICROSOFT_DECISION_NAME,
     url: FOUNDRY_BASE_URL_TEMPLATE,
-    defaultModel: MICROSOFT_DECISION_MODEL,
+    defaultModel: FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
   },
   {
     label: 'Gemini Decisions API',

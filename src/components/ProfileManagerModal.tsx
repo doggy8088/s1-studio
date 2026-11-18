@@ -12,8 +12,9 @@ import { getProfileApiKeyEnvVar } from '@/lib/code-exporter';
 import {
   FOUNDRY_BASE_URL_TEMPLATE,
   FOUNDRY_DECISION_PATH,
-  MICROSOFT_DECISION_MODEL,
+  FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
   isMicrosoftDecisionProfile,
+  resolveFoundryResourceUrl,
 } from '@/lib/microsoft-decision';
 import {
   buildGeminiDecisionsEndpoint,
@@ -549,12 +550,25 @@ export function ProfileManagerModal({
                   onChange={(e) =>
                     handleUpdateCurrent({ baseUrl: e.target.value })
                   }
+                  onPaste={(e) => {
+                    const resourceUrl = resolveFoundryResourceUrl(e.clipboardData.getData('text'));
+                    if (!resourceUrl) return;
+                    e.preventDefault();
+                    handleUpdateCurrent({ baseUrl: resourceUrl });
+                  }}
+                  onBlur={(e) => {
+                    const resourceUrl = resolveFoundryResourceUrl(e.currentTarget.value);
+                    if (resourceUrl && resourceUrl !== currentProfile.baseUrl) {
+                      handleUpdateCurrent({ baseUrl: resourceUrl });
+                    }
+                  }}
                   placeholder={isFoundry ? FOUNDRY_BASE_URL_TEMPLATE : 'http://localhost:11434'}
                   className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
                 {isFoundry && (
                   <p id="foundry-endpoint-help" className="mt-2 text-xs text-zinc-400">
                     從 Microsoft Foundry 部署詳細資料複製資源端點、部署名稱和 API Key。
+                    貼上完整決策 API 網址時，會自動保留資源根網址。
                   </p>
                 )}
                 {isGemini && (
@@ -1043,7 +1057,7 @@ export function ProfileManagerModal({
                       isCf
                         ? '@cf/cloudflare/clef / @cf/cloudflare/clef-omni / @cf/cloudflare/clef-flash'
                         : isFoundry
-                          ? MICROSOFT_DECISION_MODEL
+                          ? FOUNDRY_DEFAULT_DEPLOYMENT_NAME
                           : 'clef:27b / clef / jev-latest'
                     }
                     className="mt-1.5 w-full rounded-xl border border-[#2b303d] bg-[#0d0e12] px-3.5 py-2.5 font-mono text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"

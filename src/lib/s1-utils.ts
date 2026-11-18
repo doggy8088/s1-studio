@@ -29,7 +29,7 @@ import {
   FOUNDRY_API_KEY_ENV_VAR,
   FOUNDRY_API_KEY_HEADER,
   FOUNDRY_BASE_URL_TEMPLATE,
-  MICROSOFT_DECISION_MODEL,
+  FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
   isMicrosoftDecisionProfile,
   resolveFoundryDecisionEndpoint,
   toMicrosoftDecisionRequest,
@@ -363,7 +363,7 @@ export function isProfileEndpointAndKeyValid(
  */
 export function getDefaultModelsForProfile(profile: EndpointProfile): string[] {
   if (isMicrosoftDecisionProfile(profile)) {
-    return [MICROSOFT_DECISION_MODEL];
+    return [FOUNDRY_DEFAULT_DEPLOYMENT_NAME];
   }
   if (isGeminiDecisionsProfile(profile)) {
     return [...GEMINI_DECISIONS_MODELS];

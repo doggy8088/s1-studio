@@ -33,7 +33,7 @@ S1 Studio 支援六種決策 API 提供者，外加一個內建模擬器。本�
 | Cloudflare | `@cf/cloudflare/clef`、`clef-omni`、`clef-flash` | 固定清單 |
 | TypeSafe AI | `jev-latest`、`jev-preview`、`jev-1.14.0`、`jev-1.13.0` | 查詢 `/v1/models` 等端點後快取 |
 | Gemini | `gemini-decision-1` | 固定清單 |
-| Microsoft Foundry | `Microsoft-Decision-1.1` | 手動填入 Foundry 的部署名稱 |
+| Microsoft Foundry | `Microsoft-Decision-1.1` | 預填部署名稱 `Decision-1.1`，可依 Foundry 設定修改 |
 | 內建模擬器 | `clef-simulator-1.0`（標籤） | 固定清單 |
 
 ## 請求格式

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EndpointProfile, S1RequestPayload } from '@/types/systemone';
-import { MICROSOFT_DECISION_PROFILE_ID } from '@/lib/microsoft-decision';
+import {
+  MICROSOFT_DECISION_PROFILE_ID,
+  resolveFoundryDecisionEndpoint,
+  resolveFoundryResourceUrl,
+} from '@/lib/microsoft-decision';
 import { DEFAULT_PROFILES } from '@/lib/presets';
 import { executeSystemOneRequest } from '@/lib/s1-utils';
 import {
@@ -146,6 +150,20 @@ describe('Microsoft Decision 1.1 (Foundry)', () => {
     images: [png],
     questions: { severity: { type: 'score', instructions: 'How severe?', criteria: ['low', 'medium', 'high'] } },
   };
+
+  test('Foundry presets use Decision-1.1 as the deployment name', () => {
+    expect(profile(MICROSOFT_DECISION_PROFILE_ID).defaultModel).toBe('Decision-1.1');
+  });
+
+  test('normalizes pasted Foundry endpoints without changing other hosts or paths', () => {
+    const resource = 'https://example.services.ai.azure.com';
+    for (const value of [resource, resource + '/', endpoint, ' ' + endpoint + '/ ']) {
+      expect(resolveFoundryResourceUrl(value)).toBe(resource);
+      expect(resolveFoundryDecisionEndpoint(value)).toBe(endpoint);
+    }
+    expect(resolveFoundryResourceUrl(resource + '/api/projects/my-project')).toBeUndefined();
+    expect(resolveFoundryResourceUrl('https://example.services.ai.azure.com.invalid')).toBeUndefined();
+  });
 
   test('proxy mode sends the deployment name and named image assets, then reads index scores', async () => {
     nextResponse = () => Response.json({

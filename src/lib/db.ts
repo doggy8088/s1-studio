@@ -4,6 +4,12 @@ import {
   S1HistoryEntry,
   S1PresetDefinition,
 } from '@/types/systemone';
+import {
+  FOUNDRY_BASE_URL_TEMPLATE,
+  FOUNDRY_DEFAULT_DEPLOYMENT_NAME,
+  MICROSOFT_DECISION_PROFILE_ID,
+  resolveFoundryResourceUrl,
+} from './microsoft-decision';
 import { DEFAULT_PROFILES } from './presets';
 
 class S1StudioDatabase extends Dexie {
@@ -84,6 +90,22 @@ export function loadProfilesFromLocalStorage(): EndpointProfile[] {
           changed = true;
           updated = { ...updated, defaultModel: nextModel };
         }
+      }
+
+      const foundryResourceUrl = resolveFoundryResourceUrl(updated.baseUrl);
+      if (foundryResourceUrl && foundryResourceUrl !== updated.baseUrl) {
+        changed = true;
+        updated = { ...updated, baseUrl: foundryResourceUrl };
+      }
+
+      if (
+        updated.id === MICROSOFT_DECISION_PROFILE_ID &&
+        updated.baseUrl === FOUNDRY_BASE_URL_TEMPLATE &&
+        !updated.apiKey &&
+        updated.defaultModel === 'Microsoft-Decision-1.1'
+      ) {
+        changed = true;
+        updated = { ...updated, defaultModel: FOUNDRY_DEFAULT_DEPLOYMENT_NAME };
       }
 
       if (

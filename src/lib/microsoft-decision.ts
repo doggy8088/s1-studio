@@ -3,13 +3,13 @@ import { toSystemOneAssetRequest, validateSystemOneImages } from './systemone-as
 
 export const MICROSOFT_DECISION_PROFILE_ID = 'microsoft-foundry-decision';
 export const MICROSOFT_DECISION_NAME = 'Microsoft Decision 1.1 (Foundry)';
-export const MICROSOFT_DECISION_MODEL = 'Microsoft-Decision-1.1';
+export const FOUNDRY_DEFAULT_DEPLOYMENT_NAME = 'Decision-1.1';
 export const FOUNDRY_BASE_URL_TEMPLATE = 'https://your-resource.services.ai.azure.com';
 export const FOUNDRY_DECISION_PATH = '/providers/microsoft/v1/systemone';
 export const FOUNDRY_API_KEY_HEADER = 'api-key';
 export const FOUNDRY_API_KEY_ENV_VAR = 'AZURE_API_KEY';
 
-export function resolveFoundryDecisionEndpoint(baseUrl: string): string | undefined {
+export function resolveFoundryResourceUrl(baseUrl: string): string | undefined {
   try {
     const url = new URL(baseUrl.trim());
     if (
@@ -20,17 +20,22 @@ export function resolveFoundryDecisionEndpoint(baseUrl: string): string | undefi
 
     const path = url.pathname.replace(/\/+$/, '');
     if (path && path !== FOUNDRY_DECISION_PATH) return undefined;
-    return url.origin + FOUNDRY_DECISION_PATH;
+    return url.origin;
   } catch {
     return undefined;
   }
+}
+
+export function resolveFoundryDecisionEndpoint(baseUrl: string): string | undefined {
+  const resourceUrl = resolveFoundryResourceUrl(baseUrl);
+  return resourceUrl ? resourceUrl + FOUNDRY_DECISION_PATH : undefined;
 }
 
 export function isMicrosoftDecisionProfile(
   profile: Pick<EndpointProfile, 'id' | 'baseUrl'>
 ): boolean {
   return profile.id === MICROSOFT_DECISION_PROFILE_ID ||
-    Boolean(resolveFoundryDecisionEndpoint(profile.baseUrl));
+    Boolean(resolveFoundryResourceUrl(profile.baseUrl));
 }
 
 export function validateMicrosoftDecisionImages(images?: string[]): string | null {
