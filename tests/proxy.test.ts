@@ -40,13 +40,15 @@ function proxyRequest(target: string, auth = 'Bearer KEY123'): Request {
 const runtimes = [
   {
     name: 'Next.js /api/proxy',
+    redirectMode: 'error',
     call: (req: Request) => nextProxyPost(new NextRequest(req)),
   },
   {
     name: 'Cloudflare Pages /api/proxy',
+    redirectMode: 'manual',
     call: (req: Request) => cfProxyPost({ request: req }),
   },
-];
+] as const;
 
 for (const rt of runtimes) {
   describe(rt.name, () => {
@@ -81,7 +83,7 @@ for (const rt of runtimes) {
         expect((await rt.call(req)).status).toBe(200);
         const upstream = calls.at(-1);
         expect(upstream?.url).toBe(endpoint);
-        expect(upstream?.init.redirect).toBe('error');
+        expect(upstream?.init.redirect).toBe(rt.redirectMode);
         const headers = new Headers(upstream?.init.headers);
         expect(headers.get('api-key')).toBe('azure-test-key');
         expect(headers.has('Authorization')).toBe(false);
@@ -132,6 +134,31 @@ for (const rt of runtimes) {
     });
   });
 }
+
+test('Cloudflare rejects a Foundry redirect without forwarding the API key', async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    if (init?.redirect === 'error') {
+      throw new TypeError('Invalid redirect value');
+    }
+    return new Response(null, {
+      status: 307,
+      headers: { Location: 'https://example.invalid/redirect' },
+    });
+  }) as typeof fetch;
+
+  const endpoint = 'https://example.services.ai.azure.com/providers/microsoft/v1/systemone';
+  const request = proxyRequest(endpoint);
+  request.headers.set('api-key', 'azure-test-key');
+
+  const response = await cfProxyPost({ request });
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: 'Microsoft Foundry returned an unexpected redirect.' });
+  expect(response.headers.has('Location')).toBe(false);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toBe(endpoint);
+  expect(calls[0].init.redirect).toBe('manual');
+});
 
 test('Cloudflare proxy CORS preflight allows Gemini, Foundry, and TypeSafe headers', async () => {
   const res = await cfProxyOptions();

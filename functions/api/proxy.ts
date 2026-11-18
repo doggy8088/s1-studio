@@ -277,8 +277,15 @@ export const onRequestPost = async (context: { request: Request }) => {
       method: 'POST',
       headers: forwardHeaders,
       body: bodyText,
-      ...(foundryEndpoint ? { redirect: 'error' } : {}),
+      // Workers supports manual redirects, which keeps the API key on this request.
+      ...(foundryEndpoint ? { redirect: 'manual' } : {}),
     });
+    if (foundryEndpoint && upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
+      return Response.json(
+        { error: 'Microsoft Foundry returned an unexpected redirect.' },
+        { status: 502, headers: { 'Access-Control-Allow-Origin': '*' } }
+      );
+    }
     const latencyMs = Math.max(1, Date.now() - startTime);
 
     const responseText = await upstreamResponse.text();
